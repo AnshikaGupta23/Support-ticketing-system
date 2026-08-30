@@ -1,0 +1,17 @@
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Local databases & logs
+*.sqlite
+backend/database.sqlite
+*.log
+
+# Environment variables
+.env
+.env.local
+
+# Build output
+dist/
+build/
+.DS_Store
