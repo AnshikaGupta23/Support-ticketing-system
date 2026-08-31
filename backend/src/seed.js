@@ -36,25 +36,28 @@ export const seedDatabase = async () => {
     END;
   `);
 
-  // Hash password
-  const passwordHash = await bcrypt.hash('password123', 10);
+  // Hash distinct passwords for each user
+  const sarahHash = await bcrypt.hash('SarahPass#2026', 10);
+  const alexHash = await bcrypt.hash('AlexPass#2026', 10);
+  const mayaHash = await bcrypt.hash('MayaPass#2026', 10);
+  const davidHash = await bcrypt.hash('DavidPass#2026', 10);
 
-  // Insert Users
+  // Insert Users with distinct passwords
   const sarahRes = await execute(
     "INSERT INTO users (name, email, password_hash, role) VALUES ('Sarah Connor', 'sarah@company.com', ?, 'SUPERVISOR')",
-    [passwordHash]
+    [sarahHash]
   );
   const alexRes = await execute(
     "INSERT INTO users (name, email, password_hash, role) VALUES ('Alex Mercer', 'alex@company.com', ?, 'AGENT')",
-    [passwordHash]
+    [alexHash]
   );
   const mayaRes = await execute(
     "INSERT INTO users (name, email, password_hash, role) VALUES ('Maya Lin', 'maya@company.com', ?, 'AGENT')",
-    [passwordHash]
+    [mayaHash]
   );
   const davidRes = await execute(
     "INSERT INTO users (name, email, password_hash, role) VALUES ('David Kim', 'david@company.com', ?, 'AGENT')",
-    [passwordHash]
+    [davidHash]
   );
 
   const sarahId = sarahRes.lastID;
@@ -82,7 +85,7 @@ export const seedDatabase = async () => {
       category: 'BILLING',
       assignee_id: alexId,
       collabs: [mayaId],
-      created_at: hoursAgo(5), // 5 hrs ago on URGENT (2h limit) -> BREACHED!
+      created_at: hoursAgo(5),
     },
     {
       number: 'TCK-1002',
@@ -96,7 +99,7 @@ export const seedDatabase = async () => {
       assignee_id: alexId,
       collabs: [davidId],
       created_at: hoursAgo(3),
-      pending_started_at: hoursAgo(2), // Pending 2 hours ago -> Paused
+      pending_started_at: hoursAgo(2),
     },
     {
       number: 'TCK-1003',
@@ -109,7 +112,7 @@ export const seedDatabase = async () => {
       category: 'BUG',
       assignee_id: mayaId,
       collabs: [alexId, davidId],
-      created_at: hoursAgo(20), // 20 hrs ago on MEDIUM (24h limit) -> NEAR_BREACH!
+      created_at: hoursAgo(20),
     },
     {
       number: 'TCK-1004',
@@ -178,21 +181,18 @@ export const seedDatabase = async () => {
 
     const ticketId = res.lastID;
 
-    // Collaborators
     if (t.collabs && t.collabs.length > 0) {
       for (const cid of t.collabs) {
         await execute('INSERT INTO ticket_collaborators (ticket_id, user_id) VALUES (?, ?)', [ticketId, cid]);
       }
     }
 
-    // Timeline History
     await execute(
       `INSERT INTO ticket_history (ticket_id, actor_id, actor_name, action_type, old_value, new_value, details, created_at)
        VALUES (?, ?, 'System', 'TICKET_CREATED', NULL, ?, ?, ?)`,
       [ticketId, sarahId, t.status, `Ticket ${t.number} created.`, t.created_at]
     );
 
-    // Initial Replies
     if (t.number === 'TCK-1001') {
       await execute(
         `INSERT INTO replies (ticket_id, author_id, author_name, author_email, body, is_internal_note, created_at)
@@ -217,7 +217,7 @@ export const seedDatabase = async () => {
   console.log('✅ Seeded 6 tickets with full SLA states, history, collaborators, and replies.');
 };
 
-if (process.argv[1].endsWith('seed.js')) {
+if (process.argv[1] && process.argv[1].endsWith('seed.js')) {
   seedDatabase()
     .then(() => process.exit(0))
     .catch((err) => {

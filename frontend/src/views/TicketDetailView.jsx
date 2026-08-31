@@ -1,0 +1,451 @@
+import { useState, useEffect } from 'react';
+import { useParams, Link } from 'react-router-dom';
+import api from '../api';
+import { useAuth } from '../context/AuthContext';
+
+const TicketDetailView = () => {
+  const { id } = useParams();
+  const { user, isSupervisor } = useAuth();
+
+  const [ticket, setTicket] = useState(null);
+  const [collaborators, setCollaborators] = useState([]);
+  const [replies, setReplies] = useState([]);
+  const [history, setHistory] = useState([]);
+  const [slaClock, setSlaClock] = useState(null);
+  const [usersList, setUsersList] = useState([]);
+  const [activeTab, setActiveTab] = useState('REPLIES'); // REPLIES | TIMELINE
+
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  // Reply Form state
+  const [replyBody, setReplyBody] = useState('');
+  const [isInternalNote, setIsInternalNote] = useState(false);
+  const [submittingReply, setSubmittingReply] = useState(false);
+
+  // Reassign / Collaborator state
+  const [selectedAssignee, setSelectedAssignee] = useState('');
+  const [selectedCollaborator, setSelectedCollaborator] = useState('');
+
+  const fetchTicketDetails = async () => {
+    try {
+      const res = await api.get(`/tickets/${id}`);
+      setTicket(res.data.ticket);
+      setCollaborators(res.data.collaborators || []);
+      setReplies(res.data.replies || []);
+      setHistory(res.data.history || []);
+      setSlaClock(res.data.sla_clock || null);
+      setSelectedAssignee(res.data.ticket.primary_assignee_id || '');
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to load ticket details.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchTicketDetails();
+    api.get('/auth/users').then((res) => setUsersList(res.data.users || []));
+  }, [id]);
+
+  // Live timer interval update
+  useEffect(() => {
+    const timer = setInterval(() => {
+      if (ticket && ticket.status !== 'RESOLVED' && ticket.status !== 'CLOSED' && ticket.status !== 'PENDING') {
+        fetchTicketDetails();
+      }
+    }, 30000);
+    return () => clearInterval(timer);
+  }, [ticket]);
+
+  // Transition status
+  const handleStatusTransition = async (newStatus) => {
+    try {
+      await api.post(`/tickets/${id}/status`, { status: newStatus });
+      fetchTicketDetails();
+    } catch (err) {
+      alert(err.response?.data?.error || 'Status transition failed.');
+    }
+  };
+
+  // Handle Primary Reassign
+  const handleReassign = async (newAssigneeId) => {
+    try {
+      await api.post(`/tickets/${id}/reassign`, {
+        primary_assignee_id: newAssigneeId ? Number(newAssigneeId) : null,
+      });
+      fetchTicketDetails();
+    } catch (err) {
+      alert(err.response?.data?.error || 'Reassignment failed.');
+      setSelectedAssignee(ticket.primary_assignee_id || '');
+    }
+  };
+
+  // Add Collaborator
+  const handleAddCollaborator = async () => {
+    if (!selectedCollaborator) return;
+    try {
+      await api.post(`/tickets/${id}/collaborators`, {
+        user_id: Number(selectedCollaborator),
+        action: 'ADD',
+      });
+      setSelectedCollaborator('');
+      fetchTicketDetails();
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to add collaborator.');
+    }
+  };
+
+  // Remove Collaborator
+  const handleRemoveCollaborator = async (userId) => {
+    try {
+      await api.post(`/tickets/${id}/collaborators`, {
+        user_id: userId,
+        action: 'REMOVE',
+      });
+      fetchTicketDetails();
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to remove collaborator.');
+    }
+  };
+
+  // Post Reply
+  const handlePostReply = async (e) => {
+    e.preventDefault();
+    if (!replyBody.trim()) return;
+
+    setSubmittingReply(true);
+    try {
+      await api.post(`/tickets/${id}/replies`, {
+        body: replyBody,
+        is_internal_note: isInternalNote,
+      });
+      setReplyBody('');
+      fetchTicketDetails();
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to post reply.');
+    } finally {
+      setSubmittingReply(false);
+    }
+  };
+
+  // Simulate Customer Reply
+  const handleSimulateCustomerReply = async () => {
+    try {
+      await api.post(`/tickets/${id}/replies`, {
+        body: 'Hello team, I am replying as the customer to provide the requested logs. Please check!',
+        is_internal_note: false,
+        author_name: ticket.requester_name,
+        author_email: ticket.requester_email,
+      });
+      fetchTicketDetails();
+    } catch (err) {
+      alert('Simulation failed.');
+    }
+  };
+
+  if (loading) return <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>Loading ticket details...</div>;
+  if (error || !ticket) return <div className="alert alert-danger">{error || 'Ticket not found.'}</div>;
+
+  const isAssigneeOrSupervisor = isSupervisor || user?.id === ticket.primary_assignee_id;
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+      {/* Header Bar */}
+      <div>
+        <Link to="/queue" style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+          ← Back to Ticket Queue
+        </Link>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1rem', marginTop: '0.5rem' }}>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+              <code style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--primary)' }}>
+                {ticket.ticket_number}
+              </code>
+              <span className={`badge badge-${ticket.status.toLowerCase()}`}>{ticket.status}</span>
+              <span className={`badge badge-${ticket.priority.toLowerCase()}`}>{ticket.priority}</span>
+              <span style={{ fontSize: '0.8rem', background: 'var(--bg-card)', padding: '0.2rem 0.5rem', borderRadius: '4px', border: '1px solid var(--border-color)' }}>
+                {ticket.category}
+              </span>
+            </div>
+            <h1 style={{ fontSize: '1.5rem', fontWeight: 800, marginTop: '0.4rem' }}>
+              {ticket.subject}
+            </h1>
+          </div>
+
+          {/* Live SLA Countdown Badge */}
+          {slaClock && (
+            <div
+              className={`card`}
+              style={{
+                padding: '0.75rem 1.25rem',
+                borderColor:
+                  slaClock.sla_status === 'BREACHED'
+                    ? 'var(--danger)'
+                    : slaClock.sla_status === 'NEAR_BREACH'
+                    ? 'var(--warning)'
+                    : 'var(--success)',
+                background:
+                  slaClock.sla_status === 'BREACHED'
+                    ? 'var(--danger-bg)'
+                    : slaClock.is_paused
+                    ? 'var(--warning-bg)'
+                    : 'var(--bg-card)',
+              }}
+            >
+              <div style={{ fontSize: '0.75rem', textTransform: 'uppercase', fontWeight: 700, color: 'var(--text-secondary)' }}>
+                SLA Status: {slaClock.sla_status} {slaClock.is_paused && '(⏸ PAUSED)'}
+              </div>
+              <div style={{ fontSize: '1.2rem', fontWeight: 800, marginTop: '0.15rem' }}>
+                {slaClock.is_paused
+                  ? 'Clock Paused (Pending)'
+                  : `${slaClock.elapsed_hours.toFixed(1)}h / ${slaClock.target_hours}h target`}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Main Grid: Ticket Details & Action Sidebar */}
+      <div style={{ display: 'grid', gridTemplateColumns: '2.2fr 1fr', gap: '1.5rem' }}>
+        {/* Left Column: Description & Conversation/Timeline Tabs */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+          {/* Ticket Description Card */}
+          <div className="card">
+            <div className="card-title">📝 Issue Description</div>
+            <p style={{ whiteSpace: 'pre-wrap', color: 'var(--text-primary)', fontSize: '0.95rem', lineHeight: '1.6' }}>
+              {ticket.description}
+            </p>
+            <div style={{ marginTop: '1rem', paddingTop: '0.75rem', borderTop: '1px solid var(--border-color)', display: 'flex', gap: '1.5rem', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+              <div>Requester: <strong>{ticket.requester_name}</strong> ({ticket.requester_email})</div>
+              <div>Created: <strong>{new Date(ticket.created_at).toLocaleString()}</strong></div>
+            </div>
+          </div>
+
+          {/* Tabs header */}
+          <div style={{ display: 'flex', gap: '0.5rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.5rem' }}>
+            <button
+              className={`btn ${activeTab === 'REPLIES' ? 'btn-primary' : 'btn-secondary'} btn-sm`}
+              onClick={() => setActiveTab('REPLIES')}
+            >
+              💬 Conversation ({replies.length})
+            </button>
+            <button
+              className={`btn ${activeTab === 'TIMELINE' ? 'btn-primary' : 'btn-secondary'} btn-sm`}
+              onClick={() => setActiveTab('TIMELINE')}
+            >
+              📜 Immutable History Timeline ({history.length})
+            </button>
+          </div>
+
+          {/* Conversation Tab */}
+          {activeTab === 'REPLIES' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+              {/* Add Reply Form */}
+              <div className="card">
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+                  <div style={{ fontWeight: 700, fontSize: '0.95rem' }}>Post Response or Internal Note</div>
+                  <button className="btn btn-secondary btn-sm" onClick={handleSimulateCustomerReply}>
+                    ⚡ Simulate Customer Reply
+                  </button>
+                </div>
+                <form onSubmit={handlePostReply}>
+                  <div className="form-group">
+                    <textarea
+                      className="form-control"
+                      placeholder="Type your response here..."
+                      value={replyBody}
+                      onChange={(e) => setReplyBody(e.target.value)}
+                      required
+                    />
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem', cursor: 'pointer' }}>
+                      <input
+                        type="checkbox"
+                        checked={isInternalNote}
+                        onChange={(e) => setIsInternalNote(e.target.checked)}
+                      />
+                      🔒 Staff-Only Internal Note
+                    </label>
+                    <button type="submit" className="btn btn-primary btn-sm" disabled={submittingReply}>
+                      {submittingReply ? 'Posting...' : isInternalNote ? 'Post Internal Note' : 'Send Reply'}
+                    </button>
+                  </div>
+                </form>
+              </div>
+
+              {/* Replies Thread */}
+              {replies.map((r) => (
+                <div
+                  key={r.id}
+                  className="card"
+                  style={{
+                    borderLeft: r.is_internal_note ? '4px solid var(--warning)' : '4px solid var(--primary)',
+                    background: r.is_internal_note ? 'rgba(245, 158, 11, 0.05)' : 'var(--bg-card)',
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <span style={{ fontWeight: 700, fontSize: '0.9rem' }}>{r.author_name}</span>
+                      {r.is_internal_note && <span className="badge badge-pending">Internal Note</span>}
+                    </div>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                      {new Date(r.created_at).toLocaleString()}
+                    </span>
+                  </div>
+                  <p style={{ whiteSpace: 'pre-wrap', fontSize: '0.9rem', color: 'var(--text-primary)' }}>
+                    {r.body}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Timeline Tab */}
+          {activeTab === 'TIMELINE' && (
+            <div className="card">
+              <div className="card-title">📜 Audit History Log (Storage Immutable)</div>
+              <div className="timeline">
+                {history.map((h) => (
+                  <div key={h.id} className="timeline-item">
+                    <div className="timeline-dot" />
+                    <div style={{ fontWeight: 600, fontSize: '0.85rem', color: 'var(--text-primary)' }}>
+                      {h.action_type.replace('_', ' ')} by {h.actor_name || 'System'}
+                    </div>
+                    <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>
+                      {h.details || `Changed from "${h.old_value}" to "${h.new_value}"`}
+                    </div>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>
+                      {new Date(h.created_at).toLocaleString()}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Right Sidebar: Controls & Assignment */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+          {/* Lifecycle State Machine Controls */}
+          <div className="card">
+            <div className="card-title">⚙️ Transition Status</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              <button
+                className={`btn ${ticket.status === 'OPEN' ? 'btn-primary' : 'btn-secondary'} btn-sm`}
+                onClick={() => handleStatusTransition('OPEN')}
+                disabled={ticket.status === 'OPEN'}
+              >
+                Set OPEN (Resume Clock)
+              </button>
+              <button
+                className={`btn ${ticket.status === 'PENDING' ? 'btn-primary' : 'btn-secondary'} btn-sm`}
+                onClick={() => handleStatusTransition('PENDING')}
+                disabled={ticket.status === 'PENDING'}
+              >
+                Set PENDING (Pause Clock)
+              </button>
+              <button
+                className={`btn ${ticket.status === 'RESOLVED' ? 'btn-primary' : 'btn-secondary'} btn-sm`}
+                onClick={() => handleStatusTransition('RESOLVED')}
+                disabled={ticket.status === 'RESOLVED'}
+              >
+                Set RESOLVED
+              </button>
+              <button
+                className={`btn ${ticket.status === 'CLOSED' ? 'btn-primary' : 'btn-secondary'} btn-sm`}
+                onClick={() => handleStatusTransition('CLOSED')}
+                disabled={ticket.status === 'CLOSED'}
+              >
+                Set CLOSED
+              </button>
+            </div>
+          </div>
+
+          {/* Primary Assignee Selector */}
+          <div className="card">
+            <div className="card-title">👤 Primary Assignee</div>
+            <select
+              className="form-control"
+              value={selectedAssignee}
+              onChange={(e) => {
+                setSelectedAssignee(e.target.value);
+                handleReassign(e.target.value);
+              }}
+            >
+              <option value="">Unassigned</option>
+              {usersList.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.name} ({u.role})
+                </option>
+              ))}
+            </select>
+            {!isSupervisor && user?.id === ticket.primary_assignee_id && (
+              <p style={{ fontSize: '0.75rem', color: 'var(--warning)', marginTop: '0.5rem' }}>
+                ⚠️ As an Agent, server RBAC rejects reassigning tickets away from yourself.
+              </p>
+            )}
+          </div>
+
+          {/* Collaborators Manager */}
+          <div className="card">
+            <div className="card-title">👥 Collaborators</div>
+            <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem' }}>
+              <select
+                className="form-control"
+                style={{ fontSize: '0.85rem' }}
+                value={selectedCollaborator}
+                onChange={(e) => setSelectedCollaborator(e.target.value)}
+              >
+                <option value="">Select user...</option>
+                {usersList
+                  .filter((u) => u.id !== ticket.primary_assignee_id && !collaborators.some((c) => c.user_id === u.id))
+                  .map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.name}
+                    </option>
+                  ))}
+              </select>
+              <button className="btn btn-primary btn-sm" onClick={handleAddCollaborator}>
+                Add
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+              {collaborators.length === 0 ? (
+                <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>No collaborators added.</span>
+              ) : (
+                collaborators.map((c) => (
+                  <div
+                    key={c.user_id}
+                    style={{
+                      display: 'flex',
+                      justify: 'space-between',
+                      alignItems: 'center',
+                      background: 'var(--bg-main)',
+                      padding: '0.35rem 0.6rem',
+                      borderRadius: 'var(--radius-sm)',
+                      fontSize: '0.85rem',
+                    }}
+                  >
+                    <span>{c.user_name}</span>
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      style={{ padding: '0.1rem 0.3rem', fontSize: '0.7rem' }}
+                      onClick={() => handleRemoveCollaborator(c.user_id)}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default TicketDetailView;
