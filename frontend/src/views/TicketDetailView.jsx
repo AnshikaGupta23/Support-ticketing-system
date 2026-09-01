@@ -27,6 +27,48 @@ const TicketDetailView = () => {
   const [selectedAssignee, setSelectedAssignee] = useState('');
   const [selectedCollaborator, setSelectedCollaborator] = useState('');
 
+  // Edit Ticket state
+  const [isEditing, setIsEditing] = useState(false);
+  const [editSubject, setEditSubject] = useState('');
+  const [editDescription, setEditDescription] = useState('');
+  const [editPriority, setEditPriority] = useState('MEDIUM');
+  const [editCategory, setEditCategory] = useState('QUESTION');
+  const [editRequesterName, setEditRequesterName] = useState('');
+  const [editRequesterEmail, setEditRequesterEmail] = useState('');
+  const [submittingEdit, setSubmittingEdit] = useState(false);
+
+  const startEditing = () => {
+    if (!ticket) return;
+    setEditSubject(ticket.subject || '');
+    setEditDescription(ticket.description || '');
+    setEditPriority(ticket.priority || 'MEDIUM');
+    setEditCategory(ticket.category || 'QUESTION');
+    setEditRequesterName(ticket.requester_name || '');
+    setEditRequesterEmail(ticket.requester_email || '');
+    setIsEditing(true);
+  };
+
+  const handleSaveEdit = async (e) => {
+    e.preventDefault();
+    setSubmittingEdit(true);
+    try {
+      await api.put(`/tickets/${id}`, {
+        subject: editSubject,
+        description: editDescription,
+        priority: editPriority,
+        category: editCategory,
+        requester_name: editRequesterName,
+        requester_email: editRequesterEmail,
+      });
+      setIsEditing(false);
+      fetchTicketDetails();
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to update ticket details.');
+    } finally {
+      setSubmittingEdit(false);
+    }
+  };
+
   const fetchTicketDetails = async () => {
     try {
       const res = await api.get(`/tickets/${id}`);
@@ -147,7 +189,8 @@ const TicketDetailView = () => {
   if (loading) return <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>Loading ticket details...</div>;
   if (error || !ticket) return <div className="alert alert-danger">{error || 'Ticket not found.'}</div>;
 
-  const isAssigneeOrSupervisor = isSupervisor || user?.id === ticket.primary_assignee_id;
+  const isCollaborator = collaborators.some((c) => (c.id || c.user_id) === user?.id);
+  const canEdit = isSupervisor || user?.id === ticket.primary_assignee_id || isCollaborator;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
@@ -167,6 +210,11 @@ const TicketDetailView = () => {
               <span style={{ fontSize: '0.8rem', background: 'var(--bg-card)', padding: '0.2rem 0.5rem', borderRadius: '4px', border: '1px solid var(--border-color)' }}>
                 {ticket.category}
               </span>
+              {canEdit && !isEditing && (
+                <button className="btn btn-secondary btn-sm" onClick={startEditing} style={{ marginLeft: '0.5rem' }}>
+                  ✏️ Edit Ticket
+                </button>
+              )}
             </div>
             <h1 style={{ fontSize: '1.5rem', fontWeight: 800, marginTop: '0.4rem' }}>
               {ticket.subject}
@@ -210,17 +258,109 @@ const TicketDetailView = () => {
       <div style={{ display: 'grid', gridTemplateColumns: '2.2fr 1fr', gap: '1.5rem' }}>
         {/* Left Column: Description & Conversation/Timeline Tabs */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-          {/* Ticket Description Card */}
-          <div className="card">
-            <div className="card-title">📝 Issue Description</div>
-            <p style={{ whiteSpace: 'pre-wrap', color: 'var(--text-primary)', fontSize: '0.95rem', lineHeight: '1.6' }}>
-              {ticket.description}
-            </p>
-            <div style={{ marginTop: '1rem', paddingTop: '0.75rem', borderTop: '1px solid var(--border-color)', display: 'flex', gap: '1.5rem', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-              <div>Requester: <strong>{ticket.requester_name}</strong> ({ticket.requester_email})</div>
-              <div>Created: <strong>{new Date(ticket.created_at).toLocaleString()}</strong></div>
+          {/* Edit Form or Ticket Description Card */}
+          {isEditing ? (
+            <div className="card" style={{ border: '2px solid var(--primary)' }}>
+              <div className="card-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span>✏️ Edit Ticket Details</span>
+                <button className="btn btn-secondary btn-sm" onClick={() => setIsEditing(false)}>
+                  Cancel
+                </button>
+              </div>
+              <form onSubmit={handleSaveEdit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginTop: '0.5rem' }}>
+                <div className="form-group">
+                  <label style={{ fontWeight: 600, fontSize: '0.85rem' }}>Subject</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    value={editSubject}
+                    onChange={(e) => setEditSubject(e.target.value)}
+                    required
+                  />
+                </div>
+                <div className="form-group">
+                  <label style={{ fontWeight: 600, fontSize: '0.85rem' }}>Description</label>
+                  <textarea
+                    className="form-control"
+                    rows={5}
+                    value={editDescription}
+                    onChange={(e) => setEditDescription(e.target.value)}
+                    required
+                  />
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                  <div className="form-group">
+                    <label style={{ fontWeight: 600, fontSize: '0.85rem' }}>Priority</label>
+                    <select
+                      className="form-control"
+                      value={editPriority}
+                      onChange={(e) => setEditPriority(e.target.value)}
+                    >
+                      <option value="URGENT">URGENT</option>
+                      <option value="HIGH">HIGH</option>
+                      <option value="MEDIUM">MEDIUM</option>
+                      <option value="LOW">LOW</option>
+                    </select>
+                  </div>
+                  <div className="form-group">
+                    <label style={{ fontWeight: 600, fontSize: '0.85rem' }}>Category</label>
+                    <select
+                      className="form-control"
+                      value={editCategory}
+                      onChange={(e) => setEditCategory(e.target.value)}
+                    >
+                      <option value="BUG">BUG</option>
+                      <option value="BILLING">BILLING</option>
+                      <option value="QUESTION">QUESTION</option>
+                      <option value="FEATURE">FEATURE</option>
+                      <option value="OTHER">OTHER</option>
+                    </select>
+                  </div>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                  <div className="form-group">
+                    <label style={{ fontWeight: 600, fontSize: '0.85rem' }}>Requester Name</label>
+                    <input
+                      type="text"
+                      className="form-control"
+                      value={editRequesterName}
+                      onChange={(e) => setEditRequesterName(e.target.value)}
+                      required
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label style={{ fontWeight: 600, fontSize: '0.85rem' }}>Requester Email</label>
+                    <input
+                      type="email"
+                      className="form-control"
+                      value={editRequesterEmail}
+                      onChange={(e) => setEditRequesterEmail(e.target.value)}
+                      required
+                    />
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', marginTop: '0.5rem' }}>
+                  <button type="button" className="btn btn-secondary btn-sm" onClick={() => setIsEditing(false)}>
+                    Cancel
+                  </button>
+                  <button type="submit" className="btn btn-primary btn-sm" disabled={submittingEdit}>
+                    {submittingEdit ? 'Saving...' : 'Save Changes'}
+                  </button>
+                </div>
+              </form>
             </div>
-          </div>
+          ) : (
+            <div className="card">
+              <div className="card-title">📝 Issue Description</div>
+              <p style={{ whiteSpace: 'pre-wrap', color: 'var(--text-primary)', fontSize: '0.95rem', lineHeight: '1.6' }}>
+                {ticket.description}
+              </p>
+              <div style={{ marginTop: '1rem', paddingTop: '0.75rem', borderTop: '1px solid var(--border-color)', display: 'flex', gap: '1.5rem', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                <div>Requester: <strong>{ticket.requester_name}</strong> ({ticket.requester_email})</div>
+                <div>Created: <strong>{new Date(ticket.created_at).toLocaleString()}</strong></div>
+              </div>
+            </div>
+          )}
 
           {/* Tabs header */}
           <div style={{ display: 'flex', gap: '0.5rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.5rem' }}>

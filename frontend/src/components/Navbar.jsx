@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import api from '../api';
 
 const Navbar = ({ onOpenDocs }) => {
-  const { user, logout, quickLogin, isSupervisor } = useAuth();
+  const { user, logout } = useAuth();
   const navigate = useNavigate();
   const [breachCount, setBreachCount] = useState(0);
 
@@ -21,15 +21,6 @@ const Navbar = ({ onOpenDocs }) => {
     const interval = setInterval(fetchBreaches, 15000); // refresh SLA counts
     return () => clearInterval(interval);
   }, []);
-
-  const handleRoleSwitch = async (email) => {
-    try {
-      await quickLogin(email);
-      navigate('/');
-    } catch (err) {
-      console.error('Role switch failed:', err);
-    }
-  };
 
   return (
     <nav className="navbar">
@@ -71,20 +62,6 @@ const Navbar = ({ onOpenDocs }) => {
               {user?.role}
             </span>
           </div>
-
-          {/* Quick Demo Switcher Dropdown */}
-          <select
-            className="form-control"
-            style={{ padding: '0.35rem 0.6rem', fontSize: '0.8rem', width: 'auto', background: 'var(--bg-card)' }}
-            value={user?.email || ''}
-            onChange={(e) => handleRoleSwitch(e.target.value)}
-            title="Switch User Persona"
-          >
-            <option value="sarah@company.com">👑 Sarah (Supervisor)</option>
-            <option value="alex@company.com">🛡️ Alex (Agent)</option>
-            <option value="maya@company.com">🛠️ Maya (Agent)</option>
-            <option value="david@company.com">💻 David (Agent)</option>
-          </select>
 
           <button
             type="button"

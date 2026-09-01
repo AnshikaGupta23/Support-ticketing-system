@@ -354,6 +354,139 @@ router.get('/:id', authenticateToken, checkTicketPermission, async (req, res) =>
   }
 });
 
+// 4b. PUT & PATCH /api/tickets/:id - Edit Ticket Details (Subject, Description, Priority, Category, Requester)
+const updateTicketHandler = async (req, res) => {
+  try {
+    const ticketId = req.params.id;
+    const ticket = await getOne('SELECT * FROM tickets WHERE id = ?', [ticketId]);
+    if (!ticket) {
+      return res.status(404).json({ error: 'Ticket not found.' });
+    }
+
+    const { subject, description, priority, category, requester_name, requester_email, requester } = req.body;
+
+    const reqName = requester_name !== undefined ? requester_name : (requester && requester.name !== undefined ? requester.name : undefined);
+    const reqEmail = requester_email !== undefined ? requester_email : (requester && requester.email !== undefined ? requester.email : undefined);
+
+    // Validate Priority
+    if (priority !== undefined) {
+      const validPriorities = ['URGENT', 'HIGH', 'MEDIUM', 'LOW'];
+      if (!validPriorities.includes(priority)) {
+        return res.status(400).json({
+          error: `Invalid priority '${priority}'. Allowed values: ${validPriorities.join(', ')}.`,
+        });
+      }
+    }
+
+    // Validate Category
+    if (category !== undefined) {
+      const validCategories = ['BUG', 'BILLING', 'QUESTION', 'FEATURE', 'OTHER'];
+      if (!validCategories.includes(category)) {
+        return res.status(400).json({
+          error: `Invalid category '${category}'. Allowed values: ${validCategories.join(', ')}.`,
+        });
+      }
+    }
+
+    const updates = [];
+    const params = [];
+    const changes = [];
+    const oldValuesMap = {};
+    const newValuesMap = {};
+
+    if (subject !== undefined && subject !== ticket.subject) {
+      if (typeof subject !== 'string' || !subject.trim()) {
+        return res.status(400).json({ error: 'Subject cannot be empty.' });
+      }
+      updates.push('subject = ?');
+      params.push(subject.trim());
+      oldValuesMap.subject = ticket.subject;
+      newValuesMap.subject = subject.trim();
+      changes.push(`subject: "${ticket.subject}" -> "${subject.trim()}"`);
+    }
+
+    if (description !== undefined && description !== ticket.description) {
+      if (typeof description !== 'string' || !description.trim()) {
+        return res.status(400).json({ error: 'Description cannot be empty.' });
+      }
+      updates.push('description = ?');
+      params.push(description.trim());
+      oldValuesMap.description = ticket.description;
+      newValuesMap.description = description.trim();
+      changes.push(`description updated`);
+    }
+
+    if (priority !== undefined && priority !== ticket.priority) {
+      updates.push('priority = ?');
+      params.push(priority);
+      oldValuesMap.priority = ticket.priority;
+      newValuesMap.priority = priority;
+      changes.push(`priority: "${ticket.priority}" -> "${priority}"`);
+    }
+
+    if (category !== undefined && category !== ticket.category) {
+      updates.push('category = ?');
+      params.push(category);
+      oldValuesMap.category = ticket.category;
+      newValuesMap.category = category;
+      changes.push(`category: "${ticket.category}" -> "${category}"`);
+    }
+
+    if (reqName !== undefined && reqName !== ticket.requester_name) {
+      if (typeof reqName !== 'string' || !reqName.trim()) {
+        return res.status(400).json({ error: 'Requester name cannot be empty.' });
+      }
+      updates.push('requester_name = ?');
+      params.push(reqName.trim());
+      oldValuesMap.requester_name = ticket.requester_name;
+      newValuesMap.requester_name = reqName.trim();
+      changes.push(`requester_name: "${ticket.requester_name}" -> "${reqName.trim()}"`);
+    }
+
+    if (reqEmail !== undefined && reqEmail !== ticket.requester_email) {
+      if (typeof reqEmail !== 'string' || !reqEmail.trim()) {
+        return res.status(400).json({ error: 'Requester email cannot be empty.' });
+      }
+      updates.push('requester_email = ?');
+      params.push(reqEmail.trim());
+      oldValuesMap.requester_email = ticket.requester_email;
+      newValuesMap.requester_email = reqEmail.trim();
+      changes.push(`requester_email: "${ticket.requester_email}" -> "${reqEmail.trim()}"`);
+    }
+
+    if (updates.length === 0) {
+      return res.json({ ticket, message: 'No changes detected.' });
+    }
+
+    updates.push('updated_at = CURRENT_TIMESTAMP');
+    params.push(ticketId);
+
+    await execute(`UPDATE tickets SET ${updates.join(', ')} WHERE id = ?`, params);
+
+    const numChanged = Object.keys(oldValuesMap).length;
+    const oldValueStr = numChanged === 1 ? Object.values(oldValuesMap)[0] : JSON.stringify(oldValuesMap);
+    const newValueStr = numChanged === 1 ? Object.values(newValuesMap)[0] : JSON.stringify(newValuesMap);
+
+    await recordHistory({
+      ticketId,
+      actorId: req.user.id,
+      actorName: req.user.name,
+      actionType: 'TICKET_EDITED',
+      oldValue: oldValueStr,
+      newValue: newValueStr,
+      details: `Ticket edited by ${req.user.name}: ${changes.join(', ')}.`,
+    });
+
+    const updatedTicket = await getOne('SELECT * FROM tickets WHERE id = ?', [ticketId]);
+    res.json({ ticket: updatedTicket, message: 'Ticket updated successfully.' });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to update ticket.', details: err.message });
+  }
+};
+
+router.put('/:id', authenticateToken, checkTicketPermission, updateTicketHandler);
+router.patch('/:id', authenticateToken, checkTicketPermission, updateTicketHandler);
+
 // 5. POST /api/tickets/:id/status - Update Status State Machine
 router.post('/:id/status', authenticateToken, checkTicketPermission, async (req, res) => {
   try {

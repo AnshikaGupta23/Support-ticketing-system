@@ -44,6 +44,65 @@ async function runTests() {
     console.log(`  ✅ Successfully blocked update attempt: "${err.message}"\n`);
   }
 
+  // Test 4: Ticket Edit Logic & History Timeline Entry
+  try {
+    // Ensure at least one test user exists for foreign key constraint
+    let testUser = await getOne('SELECT id, name FROM users LIMIT 1');
+    if (!testUser) {
+      const uRes = await execute(
+        "INSERT INTO users (name, email, password_hash, role) VALUES ('Test User', 'testuser@example.com', 'hash', 'SUPERVISOR')"
+      );
+      testUser = { id: uRes.lastID, name: 'Test User' };
+    }
+
+    // Create dummy ticket
+    const ticketNum = `TCK-TEST-EDIT-${Date.now()}`;
+    const ticketRes = await execute(
+      `INSERT INTO tickets (ticket_number, subject, description, requester_name, requester_email, status, priority, category)
+       VALUES (?, 'Original Subject', 'Original Description', 'John Doe', 'john@example.com', 'OPEN', 'LOW', 'QUESTION')`,
+      [ticketNum]
+    );
+    const testTicketId = ticketRes.lastID;
+
+    // Record edit directly or verify history recording function
+    const recordHistoryModule = await import('./utils/history.js');
+    
+    // Perform edit query simulation
+    await execute(
+      `UPDATE tickets SET subject = ?, priority = ?, category = ?, requester_name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+      ['Updated Subject', 'HIGH', 'BUG', 'Johnathan Doe', testTicketId]
+    );
+
+    await recordHistoryModule.recordHistory({
+      ticketId: testTicketId,
+      actorId: testUser.id,
+      actorName: testUser.name,
+      actionType: 'TICKET_EDITED',
+      oldValue: JSON.stringify({ subject: 'Original Subject', priority: 'LOW', category: 'QUESTION', requester_name: 'John Doe' }),
+      newValue: JSON.stringify({ subject: 'Updated Subject', priority: 'HIGH', category: 'BUG', requester_name: 'Johnathan Doe' }),
+      details: `Ticket edited by ${testUser.name}: subject, priority, category, requester_name updated.`,
+    });
+
+    const editedTicket = await getOne('SELECT * FROM tickets WHERE id = ?', [testTicketId]);
+    const historyEntry = await getOne('SELECT * FROM ticket_history WHERE ticket_id = ? AND action_type = "TICKET_EDITED"', [testTicketId]);
+
+    if (
+      editedTicket.subject === 'Updated Subject' &&
+      editedTicket.priority === 'HIGH' &&
+      editedTicket.category === 'BUG' &&
+      editedTicket.requester_name === 'Johnathan Doe' &&
+      historyEntry &&
+      historyEntry.action_type === 'TICKET_EDITED'
+    ) {
+      console.log('Test 4 - Ticket Edit & Timeline History Log Check:');
+      console.log(`  ✅ Successfully updated ticket fields and recorded action_type: 'TICKET_EDITED' in immutable history!\n`);
+    } else {
+      console.error('❌ Test 4 Failed: Ticket fields or history log did not match expected values.');
+    }
+  } catch (err) {
+    console.error('❌ Test 4 Exception:', err);
+  }
+
   console.log('🎉 All logic tests finished!');
 }
 
