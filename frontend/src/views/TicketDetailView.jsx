@@ -69,6 +69,25 @@ const TicketDetailView = () => {
     }
   };
 
+    const handleArchive = async () => {
+    if (!window.confirm('Archive this ticket? It will be hidden from the default queue view.')) return;
+    try {
+      await api.post(`/tickets/${id}/archive`);
+      fetchTicketDetails();
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to archive ticket.');
+    }
+  };
+
+  const handleRestore = async () => {
+    try {
+      await api.post(`/tickets/${id}/restore`);
+      fetchTicketDetails();
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to restore ticket.');
+    }
+  };
+
   const fetchTicketDetails = async () => {
     try {
       const res = await api.get(`/tickets/${id}`);
@@ -103,7 +122,7 @@ const TicketDetailView = () => {
   // Transition status
   const handleStatusTransition = async (newStatus) => {
     try {
-      await api.post(`/tickets/${id}/status`, { status: newStatus });
+      await api.post(`/tickets/${id}/status`, { new_status: newStatus });
       fetchTicketDetails();
     } catch (err) {
       alert(err.response?.data?.error || 'Status transition failed.');
@@ -114,7 +133,7 @@ const TicketDetailView = () => {
   const handleReassign = async (newAssigneeId) => {
     try {
       await api.post(`/tickets/${id}/reassign`, {
-        primary_assignee_id: newAssigneeId ? Number(newAssigneeId) : null,
+        new_assignee_id: newAssigneeId ? Number(newAssigneeId) : null,
       });
       fetchTicketDetails();
     } catch (err) {
@@ -210,10 +229,25 @@ const TicketDetailView = () => {
               <span style={{ fontSize: '0.8rem', background: 'var(--bg-card)', padding: '0.2rem 0.5rem', borderRadius: '4px', border: '1px solid var(--border-color)' }}>
                 {ticket.category}
               </span>
-              {canEdit && !isEditing && (
+                            {canEdit && !isEditing && (
                 <button className="btn btn-secondary btn-sm" onClick={startEditing} style={{ marginLeft: '0.5rem' }}>
                   ✏️ Edit Ticket
                 </button>
+              )}
+              {isSupervisor && !ticket.is_archived && (
+                <button className="btn btn-secondary btn-sm" onClick={handleArchive}>
+                  🗄️ Archive
+                </button>
+              )}
+              {isSupervisor && ticket.is_archived === 1 && (
+                <button className="btn btn-primary btn-sm" onClick={handleRestore}>
+                  ♻️ Restore
+                </button>
+              )}
+              {ticket.is_archived === 1 && (
+                <span className="badge" style={{ background: 'var(--bg-main)', border: '1px solid var(--border-color)' }}>
+                  ARCHIVED
+                </span>
               )}
             </div>
             <h1 style={{ fontSize: '1.5rem', fontWeight: 800, marginTop: '0.4rem' }}>

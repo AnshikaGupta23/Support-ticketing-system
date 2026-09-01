@@ -36,7 +36,7 @@ const QueueView = () => {
     requester_name: '',
     requester_email: '',
     priority: 'MEDIUM',
-    category: 'TECHNICAL',
+    category: 'QUESTION',
     primary_assignee_id: '',
   });
 
@@ -226,14 +226,14 @@ const QueueView = () => {
 
           <select
             className="form-control"
-            value={category}
-            onChange={(e) => { setCategory(e.target.value); setPage(1); }}
+            value={newTicket.category}
+            onChange={(e) => setNewTicket({ ...newTicket, category: e.target.value })}
           >
-            <option value="">All Categories</option>
-            <option value="TECHNICAL">TECHNICAL</option>
+            <option value="BUG">BUG</option>
             <option value="BILLING">BILLING</option>
-            <option value="FEATURE_REQUEST">FEATURE REQUEST</option>
-            <option value="ACCOUNT">ACCOUNT</option>
+            <option value="QUESTION">QUESTION</option>
+            <option value="FEATURE">FEATURE</option>
+            <option value="OTHER">OTHER</option>
           </select>
 
           <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem', cursor: 'pointer', whiteSpace: 'nowrap' }}>
