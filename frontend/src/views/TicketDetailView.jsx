@@ -95,7 +95,7 @@ const TicketDetailView = () => {
       setCollaborators(res.data.collaborators || []);
       setReplies(res.data.replies || []);
       setHistory(res.data.history || []);
-      setSlaClock(res.data.sla_clock || null);
+      setSlaClock(res.data.sla || null);
       setSelectedAssignee(res.data.ticket.primary_assignee_id || '');
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to load ticket details.');
@@ -261,27 +261,17 @@ const TicketDetailView = () => {
               className={`card`}
               style={{
                 padding: '0.75rem 1.25rem',
-                borderColor:
-                  slaClock.sla_status === 'BREACHED'
-                    ? 'var(--danger)'
-                    : slaClock.sla_status === 'NEAR_BREACH'
-                    ? 'var(--warning)'
-                    : 'var(--success)',
-                background:
-                  slaClock.sla_status === 'BREACHED'
-                    ? 'var(--danger-bg)'
-                    : slaClock.is_paused
-                    ? 'var(--warning-bg)'
-                    : 'var(--bg-card)',
+                borderColor: slaClock.isBreached ? 'var(--danger)' : slaClock.isNearBreach ? 'var(--warning)' : 'var(--success)',
+                background: slaClock.isBreached ? 'var(--danger-bg)' : slaClock.isPaused ? 'var(--warning-bg)' : 'var(--bg-card)',
               }}
             >
               <div style={{ fontSize: '0.75rem', textTransform: 'uppercase', fontWeight: 700, color: 'var(--text-secondary)' }}>
-                SLA Status: {slaClock.sla_status} {slaClock.is_paused && '(⏸ PAUSED)'}
+                SLA Status: {slaClock.slaState} {slaClock.isPaused && '(⏸ PAUSED)'}
               </div>
               <div style={{ fontSize: '1.2rem', fontWeight: 800, marginTop: '0.15rem' }}>
-                {slaClock.is_paused
+                {slaClock.isPaused
                   ? 'Clock Paused (Pending)'
-                  : `${slaClock.elapsed_hours.toFixed(1)}h / ${slaClock.target_hours}h target`}
+                  : `${(slaClock.activeElapsedSeconds / 3600).toFixed(1)}h / ${slaClock.targetHours}h target`}
               </div>
             </div>
           )}

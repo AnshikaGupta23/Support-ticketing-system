@@ -69,6 +69,7 @@ export const initDb = async () => {
           is_archived INTEGER DEFAULT 0,
           pending_started_at DATETIME,
           pending_duration_seconds INTEGER DEFAULT 0,
+          reopen_count INTEGER DEFAULT 0,
           created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
           updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
           resolved_at DATETIME,

@@ -158,7 +158,7 @@ const QueueView = () => {
         requester_name: '',
         requester_email: '',
         priority: 'MEDIUM',
-        category: 'TECHNICAL',
+        category: 'QUESTION',
         primary_assignee_id: '',
       });
       fetchQueue();
@@ -469,10 +469,11 @@ const QueueView = () => {
                     value={newTicket.category}
                     onChange={(e) => setNewTicket({ ...newTicket, category: e.target.value })}
                   >
-                    <option value="TECHNICAL">TECHNICAL</option>
+                    <option value="BUG">BUG</option>
                     <option value="BILLING">BILLING</option>
-                    <option value="FEATURE_REQUEST">FEATURE REQUEST</option>
-                    <option value="ACCOUNT">ACCOUNT</option>
+                    <option value="QUESTION">QUESTION</option>
+                    <option value="FEATURE">FEATURE</option>
+                    <option value="OTHER">OTHER</option>
                   </select>
                 </div>
                 <div className="form-group">

@@ -19,12 +19,9 @@ const SlaAlertsView = () => {
         if (t.status !== 'RESOLVED' && t.status !== 'CLOSED') {
           try {
             const detailRes = await api.get(`/tickets/${t.id}`);
-            const clock = detailRes.data.sla_clock;
-            if (clock && (clock.sla_status === 'BREACHED' || clock.sla_status === 'NEAR_BREACH')) {
-              alerts.push({
-                ...t,
-                sla_clock: clock,
-              });
+            const clock = detailRes.data.sla;
+            if (clock &&(clock.isBreached || clock.isNearBreach) && !detailRes.data.acknowledgedForCurrentBreach) {
+              alerts.push({ ...t, sla_clock: clock });
             }
           } catch (e) {
             console.error(e);
@@ -118,14 +115,14 @@ const SlaAlertsView = () => {
                     <span className={`badge badge-${t.priority.toLowerCase()}`}>{t.priority}</span>
                   </td>
                   <td>
-                    <span className={`badge ${t.sla_clock.sla_status === 'BREACHED' ? 'badge-urgent' : 'badge-high'}`}>
-                      {t.sla_clock.sla_status}
+                    <span className={`badge ${t.sla_clock.isBreached ? 'badge-urgent' : 'badge-high'}`}>
+                      {t.sla_clock.slaState}
                     </span>
                   </td>
                   <td style={{ fontWeight: 700, color: 'var(--danger)' }}>
-                    {t.sla_clock.elapsed_hours.toFixed(1)} hrs
+                    {(t.sla_clock.activeElapsedSeconds / 3600).toFixed(1)} hrs
                   </td>
-                  <td style={{ color: 'var(--text-muted)' }}>{t.sla_clock.target_hours} hrs</td>
+                  <td style={{ color: 'var(--text-muted)' }}>{t.sla_clock.targetHours} hrs</td>
                   <td>{t.primary_assignee_name || 'Unassigned'}</td>
                   <td>
                     <div style={{ display: 'flex', gap: '0.5rem' }}>

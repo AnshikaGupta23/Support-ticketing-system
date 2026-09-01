@@ -34,7 +34,7 @@ const DashboardView = () => {
     const fetchStats = async () => {
       try {
         const res = await api.get('/dashboard/stats');
-        setStats(res.data.stats);
+        setStats(res.data);
       } catch (err) {
         setError('Failed to fetch dashboard metrics.');
         console.error(err);
@@ -53,7 +53,7 @@ const DashboardView = () => {
     return <div className="alert alert-danger">{error || 'Dashboard unavailable.'}</div>;
   }
 
-  const statusPieData = stats.status_breakdown.map((item) => ({
+  const statusPieData = stats.statusBreakdown.map((item) => ({
     name: item.status,
     value: item.count,
   }));
@@ -61,10 +61,10 @@ const DashboardView = () => {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
       {/* SLA Breach Alert Banner */}
-      {stats.sla_breached > 0 && (
+      {stats.headlines.breachingResponseTime > 0 && (
         <div className="alert alert-danger" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
-            <strong>⚠️ SLA Warning:</strong> {stats.sla_breached} ticket(s) currently exceed active SLA resolution targets!
+            <strong>⚠️ SLA Warning:</strong> {stats.headlines.breachingResponseTime} ticket(s) currently exceed active SLA resolution targets!
           </div>
           <Link to="/sla-alerts" className="btn btn-danger btn-sm">
             View Breach Alerts →
@@ -77,7 +77,7 @@ const DashboardView = () => {
         <div className="card">
           <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', fontWeight: 600 }}>Active Open Tickets</div>
           <div style={{ fontSize: '2rem', fontWeight: 800, color: '#4ade80', marginTop: '0.25rem' }}>
-            {stats.open_tickets}
+            {stats.headlines.open_tickets}
           </div>
           <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>Requires agent action</div>
         </div>
@@ -85,7 +85,7 @@ const DashboardView = () => {
         <div className="card">
           <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', fontWeight: 600 }}>Pending on Customer</div>
           <div style={{ fontSize: '2rem', fontWeight: 800, color: '#fbbf24', marginTop: '0.25rem' }}>
-            {stats.pending_tickets}
+            {stats.headlines.pending_tickets}
           </div>
           <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>SLA timer paused</div>
         </div>
@@ -93,7 +93,7 @@ const DashboardView = () => {
         <div className="card">
           <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', fontWeight: 600 }}>Resolved This Week</div>
           <div style={{ fontSize: '2rem', fontWeight: 800, color: '#c084fc', marginTop: '0.25rem' }}>
-            {stats.resolved_this_week}
+            {stats.headlines.resolved_this_week}
           </div>
           <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>Completed lifecycle</div>
         </div>
@@ -101,7 +101,7 @@ const DashboardView = () => {
         <div className="card">
           <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', fontWeight: 600 }}>SLA Breached</div>
           <div style={{ fontSize: '2rem', fontWeight: 800, color: '#f87171', marginTop: '0.25rem' }}>
-            {stats.sla_breached}
+            {stats.headlines.breachingResponseTime}
           </div>
           <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>Active breach alerts</div>
         </div>
@@ -142,14 +142,14 @@ const DashboardView = () => {
           <div className="card-title">👨‍💻 Active Workload by Agent</div>
           <div style={{ width: '100%', height: 260 }}>
             <ResponsiveContainer>
-              <BarChart data={stats.agent_workload}>
+              <BarChart data={stats.agentBreakdown}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                <XAxis dataKey="agent_name" stroke="#94a3b8" fontSize={12} />
+                <XAxis dataKey="name" stroke="#94a3b8" fontSize={12} />
                 <YAxis stroke="#94a3b8" fontSize={12} />
                 <Tooltip
                   contentStyle={{ background: '#1e293b', border: '1px solid #334155', borderRadius: '8px', color: '#fff' }}
                 />
-                <Bar dataKey="ticket_count" fill="#6366f1" radius={[4, 4, 0, 0]} name="Assigned Tickets" />
+                <Bar dataKey="total" fill="#6366f1" radius={[4, 4, 0, 0]} name="Assigned Tickets" />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -161,7 +161,7 @@ const DashboardView = () => {
         <div className="card-title">📈 8-Week Ticket Resolution Trend</div>
         <div style={{ width: '100%', height: 260 }}>
           <ResponsiveContainer>
-            <LineChart data={stats.resolution_trend}>
+            <LineChart data={stats.weeklyResolution}>
               <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
               <XAxis dataKey="week" stroke="#94a3b8" fontSize={12} />
               <YAxis stroke="#94a3b8" fontSize={12} />
@@ -169,7 +169,6 @@ const DashboardView = () => {
                 contentStyle={{ background: '#1e293b', border: '1px solid #334155', borderRadius: '8px', color: '#fff' }}
               />
               <Legend />
-              <Line type="monotone" dataKey="created" stroke="#38bdf8" strokeWidth={2} name="Created" />
               <Line type="monotone" dataKey="resolved" stroke="#4ade80" strokeWidth={2} name="Resolved" />
             </LineChart>
           </ResponsiveContainer>

@@ -12,7 +12,7 @@ const Navbar = ({ onOpenDocs }) => {
     const fetchBreaches = async () => {
       try {
         const res = await api.get('/dashboard/stats');
-        setBreachCount(res.data.stats?.sla_breached || 0);
+        setBreachCount(res.data.headlines?.breachingResponseTime || 0);
       } catch (err) {
         console.error('Error loading SLA counts:', err);
       }

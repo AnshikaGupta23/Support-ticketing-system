@@ -29,6 +29,16 @@ export const requireSupervisor = (req, res, next) => {
   next();
 };
 
+export const userCanActOnTicket = async (user, ticket) => {
+  if (user.role === 'SUPERVISOR') return true;
+  if (ticket.primary_assignee_id === user.id) return true;
+  const collab = await getOne(
+    'SELECT 1 FROM ticket_collaborators WHERE ticket_id = ? AND user_id = ?',
+    [ticket.id, user.id]
+  );
+  return !!collab;
+};
+
 export const checkTicketPermission = async (req, res, next) => {
   try {
     const ticketId = req.params.id || req.body.ticketId;

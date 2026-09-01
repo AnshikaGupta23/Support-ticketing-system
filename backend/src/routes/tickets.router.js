@@ -1,6 +1,6 @@
 import express from 'express';
 import { query, getOne, execute } from '../db.js';
-import { authenticateToken, requireSupervisor, checkTicketPermission } from '../middleware/auth.js';
+import { authenticateToken, requireSupervisor, checkTicketPermission, userCanActOnTicket} from '../middleware/auth.js';
 import { calculateSLA } from '../utils/sla.js';
 import { recordHistory } from '../utils/history.js';
 
@@ -340,7 +340,9 @@ router.get('/:id', authenticateToken, checkTicketPermission, async (req, res) =>
 
     // SLA Acknowledgments
     const acks = await query('SELECT * FROM sla_acknowledgments WHERE ticket_id = ?', [ticketId]);
-
+    const acknowledgedForCurrentBreach = acks.some(
+      (a) => a.user_id === req.user.id && a.breach_count === (ticket.reopen_count || 0)
+    );
     res.json({
       ticket,
       collaborators,
@@ -348,8 +350,10 @@ router.get('/:id', authenticateToken, checkTicketPermission, async (req, res) =>
       history,
       sla,
       acknowledgments: acks,
+      acknowledgedForCurrentBreach,
     });
-  } catch (err) {
+  }
+  catch (err) {
     res.status(500).json({ error: 'Failed to fetch ticket details.', details: err.message });
   }
 });
@@ -506,9 +510,12 @@ router.post('/:id/status', authenticateToken, checkTicketPermission, async (req,
     let pendingDurationSeconds = ticket.pending_duration_seconds || 0;
     let resolvedAt = ticket.resolved_at;
     let closedAt = ticket.closed_at;
+    let reopenCount = ticket.reopen_count || 0;
 
     const nowIso = new Date().toISOString();
-
+    if (ticket.status === 'CLOSED' && new_status === 'OPEN') {
+      reopenCount += 1;
+    }
     // 1. Moving INTO Pending -> Pause SLA Clock
     if (new_status === 'PENDING' && ticket.status !== 'PENDING') {
       pendingStartedAt = nowIso;
@@ -536,9 +543,9 @@ router.post('/:id/status', authenticateToken, checkTicketPermission, async (req,
     await execute(
       `UPDATE tickets
        SET status = ?, pending_started_at = ?, pending_duration_seconds = ?,
-           resolved_at = ?, closed_at = ?, updated_at = CURRENT_TIMESTAMP
+           resolved_at = ?, closed_at = ?, reopen_count = ?, updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`,
-      [new_status, pendingStartedAt, pendingDurationSeconds, resolvedAt, closedAt, ticketId]
+      [new_status, pendingStartedAt, pendingDurationSeconds, resolvedAt, closedAt, reopenCount, ticketId]
     );
 
     // Record Immutable Audit History
@@ -714,6 +721,16 @@ router.post('/bulk-action', authenticateToken, async (req, res) => {
 
         results.push({ ticketId: id, ticketNumber: ticket.ticket_number, success: true, message: 'Reassigned successfully.' });
       } else if (action === 'CLOSE') {
+        const allowed = await userCanActOnTicket(user, ticket);
+        if (!allowed) {
+          results.push({
+            ticketId: id,
+            ticketNumber: ticket.ticket_number,
+            success: false,
+            reason: 'Forbidden. You can only close tickets where you are the primary assignee or a collaborator.',
+          });
+          continue;
+        }
         const validation = validateStatusTransition(ticket.status, 'CLOSED', ticket.closed_at);
         if (!validation.valid) {
           results.push({ ticketId: id, ticketNumber: ticket.ticket_number, success: false, reason: validation.reason });
@@ -755,12 +772,14 @@ router.post('/:id/acknowledge-sla', authenticateToken, async (req, res) => {
     if (!ticket) return res.status(404).json({ error: 'Ticket not found.' });
 
     const sla = calculateSLA(ticket);
-    const breachCount = sla.isBreached ? 1 : 0;
+    if (!sla.isBreached && !sla.isNearBreach) {
+      return res.status(400).json({ error: 'This ticket has no active SLA alert to acknowledge.' });
+    }
 
     await execute(
       `INSERT OR REPLACE INTO sla_acknowledgments (ticket_id, user_id, acknowledged_at, breach_count)
        VALUES (?, ?, CURRENT_TIMESTAMP, ?)`,
-      [ticketId, req.user.id, breachCount]
+      [ticketId, req.user.id, ticket.reopen_count || 0]
     );
 
     await recordHistory({
