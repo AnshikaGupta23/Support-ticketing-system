@@ -16,6 +16,9 @@ const QueueView = () => {
   const [page, setPage] = useState(1);
   const limit = 10;
 
+  // Agents are always scoped to their own tickets server-side.
+  const isAgent = user?.role === 'AGENT';
+
   // Data state
   const [tickets, setTickets] = useState([]);
   const [pagination, setPagination] = useState({ total: 0, totalPages: 1 });
@@ -149,7 +152,8 @@ const QueueView = () => {
     try {
       await api.post('/tickets', {
         ...newTicket,
-        primary_assignee_id: newTicket.primary_assignee_id ? Number(newTicket.primary_assignee_id) : null,
+        // Agents always create tickets for themselves; supervisors choose or leave unassigned.
+        primary_assignee_id: isAgent ? user.id : (newTicket.primary_assignee_id ? Number(newTicket.primary_assignee_id) : null),
       });
       setIsCreateModalOpen(false);
       setNewTicket({
@@ -226,9 +230,10 @@ const QueueView = () => {
 
           <select
             className="form-control"
-            value={newTicket.category}
-            onChange={(e) => setNewTicket({ ...newTicket, category: e.target.value })}
+            value={category}
+            onChange={(e) => { setCategory(e.target.value); setPage(1); }}
           >
+            <option value="">All Categories</option>
             <option value="BUG">BUG</option>
             <option value="BILLING">BILLING</option>
             <option value="QUESTION">QUESTION</option>
@@ -236,14 +241,16 @@ const QueueView = () => {
             <option value="OTHER">OTHER</option>
           </select>
 
-          <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem', cursor: 'pointer', whiteSpace: 'nowrap' }}>
-            <input
-              type="checkbox"
-              checked={mineOnly}
-              onChange={(e) => { setMineOnly(e.target.checked); setPage(1); }}
-            />
-            My Tickets
-          </label>
+          {!isAgent && (
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+              <input
+                type="checkbox"
+                checked={mineOnly}
+                onChange={(e) => { setMineOnly(e.target.checked); setPage(1); }}
+              />
+              My Tickets
+            </label>
+          )}
 
           <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem', cursor: 'pointer', whiteSpace: 'nowrap' }}>
             <input
@@ -263,24 +270,30 @@ const QueueView = () => {
             <strong>Selected ({selectedIds.length}):</strong> Apply bulk action to selected queue items
           </div>
           <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-            <select
-              className="form-control"
-              style={{ width: 'auto', padding: '0.35rem' }}
-              value={bulkAssignee}
-              onChange={(e) => setBulkAssignee(e.target.value)}
-            >
-              <option value="">Select Target Assignee...</option>
-              {usersList.map((u) => (
-                <option key={u.id} value={u.id}>{u.name} ({u.role})</option>
-              ))}
-            </select>
-            <button
-              className="btn btn-primary btn-sm"
-              onClick={() => handleBulkAction('REASSIGN')}
-              disabled={isBulkSubmitting}
-            >
-              Bulk Reassign
-            </button>
+            {!isAgent && (
+              <>
+                <select
+                  className="form-control"
+                  style={{ width: 'auto', padding: '0.35rem' }}
+                  value={bulkAssignee}
+                  onChange={(e) => setBulkAssignee(e.target.value)}
+                >
+                  <option value="">Select Target Assignee...</option>
+                  {usersList
+                    .filter((u) => u.role === 'AGENT')
+                    .map((u) => (
+                      <option key={u.id} value={u.id}>{u.name}</option>
+                    ))}
+                </select>
+                <button
+                  className="btn btn-primary btn-sm"
+                  onClick={() => handleBulkAction('REASSIGN')}
+                  disabled={isBulkSubmitting}
+                >
+                  Bulk Reassign
+                </button>
+              </>
+            )}
             <button
               className="btn btn-danger btn-sm"
               onClick={() => handleBulkAction('CLOSE')}
@@ -482,12 +495,20 @@ const QueueView = () => {
                     className="form-control"
                     value={newTicket.primary_assignee_id}
                     onChange={(e) => setNewTicket({ ...newTicket, primary_assignee_id: e.target.value })}
+                    disabled={isAgent}
                   >
                     <option value="">Unassigned</option>
-                    {usersList.map((u) => (
-                      <option key={u.id} value={u.id}>{u.name} ({u.role})</option>
-                    ))}
+                    {usersList
+                      .filter((u) => u.role === 'AGENT')
+                      .map((u) => (
+                        <option key={u.id} value={u.id}>{u.name}</option>
+                      ))}
                   </select>
+                  {isAgent && (
+                    <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.3rem' }}>
+                      New tickets will be assigned to you ({user?.name}). Supervisors route tickets to agents.
+                    </p>
+                  )}
                 </div>
               </div>
 

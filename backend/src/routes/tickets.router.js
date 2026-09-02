@@ -1,6 +1,6 @@
 import express from 'express';
 import { query, getOne, execute } from '../db.js';
-import { authenticateToken, requireSupervisor, checkTicketPermission, userCanActOnTicket} from '../middleware/auth.js';
+import { authenticateToken, checkTicketPermission, userCanActOnTicket } from '../middleware/auth.js';
 import { calculateSLA } from '../utils/sla.js';
 import { recordHistory } from '../utils/history.js';
 
@@ -105,15 +105,15 @@ router.get('/', authenticateToken, async (req, res) => {
       params.push(assignee_id);
     }
 
-    // Mine Only filter (Primary assignee or collaborator)
+    // Visibility scope: Agents can only see tickets where they are the primary
+    // assignee or a collaborator. Supervisors see the whole queue, but can opt
+    // into mine_only to narrow to their own tickets.
     if (mine_only === 'true' || user.role === 'AGENT') {
-      if (mine_only === 'true') {
-        whereClauses.push(`(
-          t.primary_assignee_id = ? OR 
-          t.id IN (SELECT ticket_id FROM ticket_collaborators WHERE user_id = ?)
-        )`);
-        params.push(user.id, user.id);
-      }
+      whereClauses.push(`(
+        t.primary_assignee_id = ? OR 
+        t.id IN (SELECT ticket_id FROM ticket_collaborators WHERE user_id = ?)
+      )`);
+      params.push(user.id, user.id);
     }
 
     const whereSQL = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
@@ -208,6 +208,17 @@ router.get('/export-csv', authenticateToken, async (req, res) => {
       params.push(category);
     }
 
+    // Visibility scope: same rule as the queue list — agents export only their
+    // own tickets (primary assignee or collaborator).
+    const mineOnly = req.query.mine_only === 'true' || req.user.role === 'AGENT';
+    if (mineOnly) {
+      whereClauses.push(`(
+        t.primary_assignee_id = ? OR 
+        t.id IN (SELECT ticket_id FROM ticket_collaborators WHERE user_id = ?)
+      )`);
+      params.push(req.user.id, req.user.id);
+    }
+
     const whereSQL = `WHERE ${whereClauses.join(' AND ')}`;
     const sql = `
       SELECT t.ticket_number, t.subject, t.status, t.priority, t.category,
@@ -245,6 +256,46 @@ router.post('/', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: 'Subject, description, requester name and email are required.' });
     }
 
+    // Scenario 1: Agents cannot create tickets and assign them to other agents.
+    // They may only create tickets for themselves (or leave unassigned for a
+    // supervisor to route).
+    let assigneeId = primary_assignee_id || null;
+    if (req.user.role === 'AGENT' && assigneeId && assigneeId !== req.user.id) {
+      return res.status(403).json({
+        error: 'Forbidden: Agents cannot assign tickets to other agents. Create the ticket unassigned or assign it to yourself.',
+      });
+    }
+    if (assigneeId) {
+      const assignee = await getOne('SELECT id, role FROM users WHERE id = ?', [assigneeId]);
+      if (!assignee) {
+        return res.status(400).json({ error: 'Invalid assignee. User does not exist.' });
+      }
+      if (assignee.role !== 'AGENT') {
+        return res.status(400).json({ error: 'Tickets can only be assigned to Agents.' });
+      }
+    }
+
+    // Validate collaborators exist and are agents (collaborators are always agents).
+    const validCollaboratorIds = [];
+    if (Array.isArray(collaborator_ids) && collaborator_ids.length > 0) {
+      const distinctCollabIds = [...new Set(collaborator_ids.map(Number))];
+      const collabRows = await query(
+        `SELECT id, role FROM users WHERE id IN (${distinctCollabIds.map(() => '?').join(', ')})`,
+        distinctCollabIds
+      );
+      const collabById = new Map(collabRows.map((c) => [c.id, c.role]));
+      for (const userId of distinctCollabIds) {
+        const role = collabById.get(userId);
+        if (!role) {
+          return res.status(400).json({ error: `Collaborator user ${userId} does not exist.` });
+        }
+        if (role !== 'AGENT') {
+          return res.status(400).json({ error: 'Collaborators must be Agents.' });
+        }
+        validCollaboratorIds.push(userId);
+      }
+    }
+
     // Generate unique ticket number
     const countRow = await getOne('SELECT COUNT(*) as count FROM tickets');
     const ticketNum = `TCK-${1000 + (countRow ? countRow.count + 1 : 1)}`;
@@ -260,20 +311,18 @@ router.post('/', authenticateToken, async (req, res) => {
         requester_email,
         priority || 'MEDIUM',
         category || 'QUESTION',
-        primary_assignee_id || null,
+        assigneeId,
       ]
     );
 
     const ticketId = result.lastID;
 
     // Add Collaborators
-    if (Array.isArray(collaborator_ids) && collaborator_ids.length > 0) {
-      for (const userId of collaborator_ids) {
-        await execute(
-          'INSERT OR IGNORE INTO ticket_collaborators (ticket_id, user_id) VALUES (?, ?)',
-          [ticketId, userId]
-        );
-      }
+    for (const userId of validCollaboratorIds) {
+      await execute(
+        'INSERT OR IGNORE INTO ticket_collaborators (ticket_id, user_id) VALUES (?, ?)',
+        [ticketId, userId]
+      );
     }
 
     // Record Immutable Audit History
@@ -576,20 +625,39 @@ router.post('/:id/reassign', authenticateToken, async (req, res) => {
     const ticket = await getOne('SELECT * FROM tickets WHERE id = ?', [ticketId]);
     if (!ticket) return res.status(404).json({ error: 'Ticket not found.' });
 
-    // Server-enforced rule: Agents CANNOT reassign ticket away from themselves!
+    // Scenario 1 server-enforced rule: Agents cannot reassign a ticket away from
+    // themselves, and can only reassign tickets they are primary assignee or
+    // collaborator on.
     if (user.role === 'AGENT') {
-      return res.status(403).json({
-        error: 'Forbidden: Agents are not permitted to reassign tickets to other agents. Contact a supervisor.'
-      });
+      const canAct = await userCanActOnTicket(user, ticket);
+      if (!canAct) {
+        return res.status(403).json({
+          error: 'Forbidden. You can only act on tickets where you are the primary assignee or a collaborator.',
+        });
+      }
+      if (new_assignee_id && Number(new_assignee_id) !== user.id) {
+        return res.status(403).json({
+          error: 'Forbidden: Agents cannot reassign tickets to other agents. Contact a supervisor.',
+        });
+      }
     }
 
     const oldAssignee = ticket.primary_assignee_id
       ? await getOne('SELECT name FROM users WHERE id = ?', [ticket.primary_assignee_id])
       : null;
     const newAssignee = new_assignee_id
-      ? await getOne('SELECT name FROM users WHERE id = ?', [new_assignee_id])
+      ? await getOne('SELECT id, name, role FROM users WHERE id = ?', [new_assignee_id])
       : null;
-
+    if (new_assignee_id && !newAssignee) {
+      return res.status(400).json({
+        error: 'Invalid assignee. User does not exist.',
+      });
+    }
+    if (newAssignee && newAssignee.role !== 'AGENT') {
+      return res.status(400).json({
+        error: 'Tickets can only be assigned to Agents.',
+      });
+    } 
     await execute(
       'UPDATE tickets SET primary_assignee_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
       [new_assignee_id || null, ticketId]
@@ -612,38 +680,89 @@ router.post('/:id/reassign', authenticateToken, async (req, res) => {
 });
 
 // 7. POST /api/tickets/:id/collaborators - Add/Remove Collaborators
+// Accepts either an array of user IDs ({ collaborator_ids: [...] }) to replace
+// the full collaborator list, or a single add/remove ({ user_id, action }).
 router.post('/:id/collaborators', authenticateToken, checkTicketPermission, async (req, res) => {
   try {
     const ticketId = req.params.id;
-    const { collaborator_ids } = req.body; // Array of user IDs
+    const { collaborator_ids, user_id, action } = req.body;
 
-    if (!Array.isArray(collaborator_ids)) {
-      return res.status(400).json({ error: 'collaborator_ids must be an array.' });
+    const validateAgent = async (userId) => {
+      const userRow = await getOne('SELECT id, role FROM users WHERE id = ?', [userId]);
+      if (!userRow) return { error: `User ${userId} does not exist.` };
+      if (userRow.role !== 'AGENT') return { error: 'Collaborators must be Agents.' };
+      return { userRow };
+    };
+
+    if (Array.isArray(collaborator_ids)) {
+      // Replace-the-whole-list contract
+      const distinctIds = [...new Set(collaborator_ids.map(Number))];
+      const currentTicket = await getOne('SELECT primary_assignee_id FROM tickets WHERE id = ?', [ticketId]);
+      for (const userId of distinctIds) {
+        const validation = await validateAgent(userId);
+        if (validation.error) return res.status(400).json({ error: validation.error });
+        if (userId === currentTicket?.primary_assignee_id) {
+          return res.status(400).json({ error: 'The primary assignee cannot also be listed as a collaborator.' });
+        }
+      }
+      await execute('DELETE FROM ticket_collaborators WHERE ticket_id = ?', [ticketId]);
+      for (const userId of distinctIds) {
+        await execute('INSERT OR IGNORE INTO ticket_collaborators (ticket_id, user_id) VALUES (?, ?)', [ticketId, userId]);
+      }
+      await recordHistory({
+        ticketId,
+        actorId: req.user.id,
+        actorName: req.user.name,
+        actionType: 'COLLABORATORS_UPDATED',
+        details: `Collaborators set to IDs: ${distinctIds.join(', ')} by ${req.user.name}.`,
+      });
+      return res.json({ message: 'Collaborators updated.' });
     }
 
-    // Clear existing & set new
-    await execute('DELETE FROM ticket_collaborators WHERE ticket_id = ?', [ticketId]);
-
-    for (const userId of collaborator_ids) {
-      await execute('INSERT INTO ticket_collaborators (ticket_id, user_id) VALUES (?, ?)', [ticketId, userId]);
+    if (user_id && action) {
+      const normalizedId = Number(user_id);
+      if (!normalizedId) return res.status(400).json({ error: 'A valid user_id is required.' });
+      if (action === 'ADD') {
+        const validation = await validateAgent(normalizedId);
+        if (validation.error) return res.status(400).json({ error: validation.error });
+        const currentTicket = await getOne('SELECT primary_assignee_id FROM tickets WHERE id = ?', [ticketId]);
+        if (normalizedId === currentTicket?.primary_assignee_id) {
+          return res.status(400).json({ error: 'The primary assignee cannot also be listed as a collaborator.' });
+        }
+        await execute('INSERT OR IGNORE INTO ticket_collaborators (ticket_id, user_id) VALUES (?, ?)', [ticketId, normalizedId]);
+        await recordHistory({
+          ticketId,
+          actorId: req.user.id,
+          actorName: req.user.name,
+          actionType: 'COLLABORATORS_UPDATED',
+          details: `Collaborator ${normalizedId} added by ${req.user.name}.`,
+        });
+        return res.json({ message: 'Collaborator added.' });
+      }
+      if (action === 'REMOVE') {
+        await execute('DELETE FROM ticket_collaborators WHERE ticket_id = ? AND user_id = ?', [ticketId, normalizedId]);
+        await recordHistory({
+          ticketId,
+          actorId: req.user.id,
+          actorName: req.user.name,
+          actionType: 'COLLABORATORS_UPDATED',
+          details: `Collaborator ${normalizedId} removed by ${req.user.name}.`,
+        });
+        return res.json({ message: 'Collaborator removed.' });
+      }
+      return res.status(400).json({ error: `Unknown collaborator action '${action}'. Use ADD or REMOVE.` });
     }
 
-    await recordHistory({
-      ticketId,
-      actorId: req.user.id,
-      actorName: req.user.name,
-      actionType: 'COLLABORATORS_UPDATED',
-      details: `Collaborators set to IDs: ${collaborator_ids.join(', ')} by ${req.user.name}.`,
-    });
-
-    res.json({ message: 'Collaborators updated.' });
+    return res.status(400).json({ error: 'Provide collaborator_ids array, or user_id with action ADD/REMOVE.' });
   } catch (err) {
     res.status(500).json({ error: 'Failed to update collaborators.', details: err.message });
   }
 });
 
 // 8. POST /api/tickets/:id/archive & /restore
-router.post('/:id/archive', authenticateToken, requireSupervisor, async (req, res) => {
+// Scenario 2: archive/restore is a ticket action available to supervisors and to
+// agents on tickets they are primary assignee or collaborator of.
+router.post('/:id/archive', authenticateToken, checkTicketPermission, async (req, res) => {
   try {
     await execute('UPDATE tickets SET is_archived = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [req.params.id]);
     await recordHistory({
@@ -651,7 +770,7 @@ router.post('/:id/archive', authenticateToken, requireSupervisor, async (req, re
       actorId: req.user.id,
       actorName: req.user.name,
       actionType: 'ARCHIVED',
-      details: 'Ticket archived by supervisor.',
+      details: `Ticket archived by ${req.user.name}.`,
     });
     res.json({ message: 'Ticket archived.' });
   } catch (err) {
@@ -659,7 +778,7 @@ router.post('/:id/archive', authenticateToken, requireSupervisor, async (req, re
   }
 });
 
-router.post('/:id/restore', authenticateToken, requireSupervisor, async (req, res) => {
+router.post('/:id/restore', authenticateToken, checkTicketPermission, async (req, res) => {
   try {
     await execute('UPDATE tickets SET is_archived = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [req.params.id]);
     await recordHistory({
@@ -667,7 +786,7 @@ router.post('/:id/restore', authenticateToken, requireSupervisor, async (req, re
       actorId: req.user.id,
       actorName: req.user.name,
       actionType: 'RESTORED',
-      details: 'Ticket restored by supervisor.',
+      details: `Ticket restored by ${req.user.name}.`,
     });
     res.json({ message: 'Ticket restored.' });
   } catch (err) {

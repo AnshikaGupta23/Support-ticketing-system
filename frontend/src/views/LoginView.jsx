@@ -16,7 +16,7 @@ const LoginView = () => {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [role, setRole] = useState('AGENT');
+  //const [role, setRole] = useState('AGENT');
 
   const [error, setError] = useState(null);
   const [submitting, setSubmitting] = useState(false);
@@ -34,7 +34,7 @@ const LoginView = () => {
       if (mode === 'LOGIN') {
         await login(email, password);
       } else {
-        await register(name, email, password, role);
+        await register(name, email, password);
       }
       navigate('/');
     } catch (err) {
@@ -94,7 +94,7 @@ const LoginView = () => {
               <input
                 type="text"
                 className="form-control"
-                placeholder="e.g. Anshika Gupta"
+                placeholder="e.g. abc xyz"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 required
@@ -125,20 +125,8 @@ const LoginView = () => {
               required
             />
           </div>
-
-          {mode === 'REGISTER' && (
-            <div className="form-group">
-              <label className="form-label">Account Role</label>
-              <select
-                className="form-control"
-                value={role}
-                onChange={(e) => setRole(e.target.value)}
-              >
-                <option value="AGENT">🛡️ Agent Role</option>
-                <option value="SUPERVISOR">👑 Supervisor Role</option>
-              </select>
-            </div>
-          )}
+          
+          
 
           <button
             type="submit"

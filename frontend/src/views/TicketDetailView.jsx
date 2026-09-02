@@ -210,6 +210,7 @@ const TicketDetailView = () => {
 
   const isCollaborator = collaborators.some((c) => (c.id || c.user_id) === user?.id);
   const canEdit = isSupervisor || user?.id === ticket.primary_assignee_id || isCollaborator;
+  const canManageAssignment = isSupervisor; // Scenario 1: only supervisors reassign or manage collaborators
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
@@ -234,12 +235,12 @@ const TicketDetailView = () => {
                   ✏️ Edit Ticket
                 </button>
               )}
-              {isSupervisor && !ticket.is_archived && (
-                <button className="btn btn-secondary btn-sm" onClick={handleArchive}>
+              {canEdit && !ticket.is_archived && (
+                <button className="btn btn-secondary btn-sm" onClick={handleArchive} style={{ marginLeft: '0.5rem' }}>
                   🗄️ Archive
                 </button>
               )}
-              {isSupervisor && ticket.is_archived === 1 && (
+              {canEdit && ticket.is_archived === 1 && (
                 <button className="btn btn-primary btn-sm" onClick={handleRestore}>
                   ♻️ Restore
                 </button>
@@ -527,82 +528,96 @@ const TicketDetailView = () => {
             </div>
           </div>
 
-          {/* Primary Assignee Selector */}
+          {/* Primary Assignee */}
           <div className="card">
             <div className="card-title">👤 Primary Assignee</div>
-            <select
-              className="form-control"
-              value={selectedAssignee}
-              onChange={(e) => {
-                setSelectedAssignee(e.target.value);
-                handleReassign(e.target.value);
-              }}
-            >
-              <option value="">Unassigned</option>
-              {usersList.map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.name} ({u.role})
-                </option>
-              ))}
-            </select>
-            {!isSupervisor && user?.id === ticket.primary_assignee_id && (
-              <p style={{ fontSize: '0.75rem', color: 'var(--warning)', marginTop: '0.5rem' }}>
-                ⚠️ As an Agent, server RBAC rejects reassigning tickets away from yourself.
-              </p>
+            {canManageAssignment ? (
+              <>
+                <select
+                  className="form-control"
+                  value={selectedAssignee}
+                  onChange={(e) => {
+                    setSelectedAssignee(e.target.value);
+                    handleReassign(e.target.value);
+                  }}
+                >
+                  <option value="">Unassigned</option>
+                  {usersList
+                    .filter((u) => u.role === 'AGENT')
+                    .map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {u.name}
+                      </option>
+                    ))}
+                </select>
+              </>
+            ) : (
+              <div style={{ fontSize: '0.9rem', color: 'var(--text-primary)' }}>
+                {ticket.primary_assignee_name || 'Unassigned'}
+              </div>
             )}
           </div>
 
-          {/* Collaborators Manager */}
+          {/* Collaborators */}
           <div className="card">
             <div className="card-title">👥 Collaborators</div>
-            <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem' }}>
-              <select
-                className="form-control"
-                style={{ fontSize: '0.85rem' }}
-                value={selectedCollaborator}
-                onChange={(e) => setSelectedCollaborator(e.target.value)}
-              >
-                <option value="">Select user...</option>
-                {usersList
-                  .filter((u) => u.id !== ticket.primary_assignee_id && !collaborators.some((c) => c.user_id === u.id))
-                  .map((u) => (
-                    <option key={u.id} value={u.id}>
-                      {u.name}
-                    </option>
-                  ))}
-              </select>
-              <button className="btn btn-primary btn-sm" onClick={handleAddCollaborator}>
-                Add
-              </button>
-            </div>
+            {canManageAssignment && (
+              <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                <select
+                  className="form-control"
+                  style={{ fontSize: '0.85rem' }}
+                  value={selectedCollaborator}
+                  onChange={(e) => setSelectedCollaborator(e.target.value)}
+                >
+                  <option value="">Select user...</option>
+                  {usersList
+                    .filter((u) => u.role === 'AGENT')
+                    .filter((u) => u.id !== ticket.primary_assignee_id && !collaborators.some((c) => (c.id || c.user_id) === u.id))
+                    .map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {u.name}
+                      </option>
+                    ))}
+                </select>
+                <button className="btn btn-primary btn-sm" onClick={handleAddCollaborator}>
+                  Add
+                </button>
+              </div>
+            )}
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
               {collaborators.length === 0 ? (
                 <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>No collaborators added.</span>
               ) : (
-                collaborators.map((c) => (
-                  <div
-                    key={c.user_id}
-                    style={{
-                      display: 'flex',
-                      justify: 'space-between',
-                      alignItems: 'center',
-                      background: 'var(--bg-main)',
-                      padding: '0.35rem 0.6rem',
-                      borderRadius: 'var(--radius-sm)',
-                      fontSize: '0.85rem',
-                    }}
-                  >
-                    <span>{c.user_name}</span>
-                    <button
-                      className="btn btn-secondary btn-sm"
-                      style={{ padding: '0.1rem 0.3rem', fontSize: '0.7rem' }}
-                      onClick={() => handleRemoveCollaborator(c.user_id)}
+                collaborators.map((c) => {
+                  const collabId = c.id || c.user_id;
+                  const collabName = c.name || c.user_name;
+                  return (
+                    <div
+                      key={collabId}
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        background: 'var(--bg-main)',
+                        padding: '0.35rem 0.6rem',
+                        borderRadius: 'var(--radius-sm)',
+                        fontSize: '0.85rem',
+                      }}
                     >
-                      ✕
-                    </button>
-                  </div>
-                ))
+                      <span>{collabName}</span>
+                      {canManageAssignment && (
+                        <button
+                          className="btn btn-secondary btn-sm"
+                          style={{ padding: '0.1rem 0.3rem', fontSize: '0.7rem' }}
+                          onClick={() => handleRemoveCollaborator(collabId)}
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </div>
+                  );
+                })
               )}
             </div>
           </div>
