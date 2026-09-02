@@ -20,15 +20,24 @@ router.post('/', authenticateToken, checkTicketPermission, async (req, res) => {
     if (!ticket) return res.status(404).json({ error: 'Ticket not found.' });
 
     // Determine Author details
-    const authorName = is_customer_reply ? ticket.requester_name : user.name;
-    const authorEmail = is_customer_reply ? ticket.requester_email : user.email;
-    const authorId = is_customer_reply ? null : user.id;
+    // A customer reply is never authored by a staff user: it is attributed to
+    // the ticket requester (author_id NULL). The flag is also mutually exclusive
+    // with internal notes — a message cannot be both staff-only and customer-facing.
+    const isCustomerReply = is_customer_reply === true || is_customer_reply === 'true';
+    const isInternal = is_internal_note === true || is_internal_note === 'true';
+    if (isCustomerReply && isInternal) {
+      return res.status(400).json({ error: 'A reply cannot be both an internal note and a customer reply.' });
+    }
+
+    const authorName = isCustomerReply ? ticket.requester_name : user.name;
+    const authorEmail = isCustomerReply ? ticket.requester_email : user.email;
+    const authorId = isCustomerReply ? null : user.id;
 
     // Insert Reply
     const result = await execute(
       `INSERT INTO replies (ticket_id, author_id, author_name, author_email, body, is_internal_note)
        VALUES (?, ?, ?, ?, ?, ?)`,
-      [ticketId, authorId, authorName, authorEmail, body.trim(), is_internal_note ? 1 : 0]
+      [ticketId, authorId, authorName, authorEmail, body.trim(), isInternal ? 1 : 0]
     );
 
     const replyId = result.lastID;
@@ -38,12 +47,13 @@ router.post('/', authenticateToken, checkTicketPermission, async (req, res) => {
       ticketId,
       actorId: authorId,
       actorName: authorName,
-      actionType: is_internal_note ? 'INTERNAL_NOTE_ADDED' : 'REPLY_ADDED',
-      details: is_internal_note ? 'Internal note added.' : `Reply added by ${authorName}.`,
+      actionType: isInternal ? 'INTERNAL_NOTE_ADDED' : 'REPLY_ADDED',
+      details: isInternal ? 'Internal note added.' : `Reply added by ${authorName}.`,
     });
 
-    // Requirement 4: If customer replies while ticket is in PENDING, status returns to OPEN and clock resumes!
-    if (is_customer_reply && ticket.status === 'PENDING') {
+    // Requirement 4: If customer replies while ticket is in PENDING, status
+    // returns to OPEN and the SLA clock resumes. Internal notes never do this.
+    if (isCustomerReply && !isInternal && ticket.status === 'PENDING') {
       let pendingDuration = ticket.pending_duration_seconds || 0;
       if (ticket.pending_started_at) {
         const pendingStart = new Date(ticket.pending_started_at).getTime();

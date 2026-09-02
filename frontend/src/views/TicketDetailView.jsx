@@ -196,8 +196,7 @@ const TicketDetailView = () => {
       await api.post(`/tickets/${id}/replies`, {
         body: 'Hello team, I am replying as the customer to provide the requested logs. Please check!',
         is_internal_note: false,
-        author_name: ticket.requester_name,
-        author_email: ticket.requester_email,
+        is_customer_reply: true, // Server attributes this to the requester and resumes the SLA clock from PENDING.
       });
       fetchTicketDetails();
     } catch (err) {

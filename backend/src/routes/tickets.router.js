@@ -11,7 +11,14 @@ const validateStatusTransition = (currentStatus, newStatus, closedAt = null) => 
   if (currentStatus === newStatus) return { valid: true };
 
   const validTransitions = {
-    NEW: ['OPEN', 'PENDING', 'RESOLVED', 'CLOSED'],
+    // Lifecycle state machine (Requirement 4). A ticket is created NEW and must
+    // first be OPENed before it can be worked; it cannot jump straight from NEW
+    // to PENDING/RESOLVED/CLOSED. From the working states the documented moves
+    // are allowed (PENDING is optional — not every ticket waits on a customer):
+    //   - OPEN/PENDING -> RESOLVED/CLOSED   (advance lifecycle)
+    //   - PENDING -> OPEN                   (customer reply / resume the clock)
+    //   - RESOLVED/CLOSED -> OPEN           (reopen; CLOSED only within 7 days)
+    NEW: ['OPEN'],
     OPEN: ['PENDING', 'RESOLVED', 'CLOSED'],
     PENDING: ['OPEN', 'RESOLVED', 'CLOSED'],
     RESOLVED: ['OPEN', 'CLOSED'],
@@ -555,6 +562,15 @@ router.post('/:id/status', authenticateToken, checkTicketPermission, async (req,
       return res.status(400).json({ error: validation.reason });
     }
 
+    // Same-status transitions are a no-op: never rewrite timestamps or history.
+    if (new_status === ticket.status) {
+      return res.json({
+        ticket,
+        sla: calculateSLA(ticket),
+        message: `Ticket is already ${ticket.status}.`,
+      });
+    }
+
     let pendingStartedAt = ticket.pending_started_at;
     let pendingDurationSeconds = ticket.pending_duration_seconds || 0;
     let resolvedAt = ticket.resolved_at;
@@ -562,8 +578,16 @@ router.post('/:id/status', authenticateToken, checkTicketPermission, async (req,
     let reopenCount = ticket.reopen_count || 0;
 
     const nowIso = new Date().toISOString();
-    if (ticket.status === 'CLOSED' && new_status === 'OPEN') {
-      reopenCount += 1;
+
+    // Reopening to OPEN (from RESOLVED or CLOSED) clears the stale resolved and
+    // closed stamps so the ticket is a live, workable OPEN item again. Reopens
+    // from CLOSED count toward the reopen/acknowledgment tracking.
+    if (new_status === 'OPEN' && (ticket.status === 'RESOLVED' || ticket.status === 'CLOSED')) {
+      resolvedAt = null;
+      if (ticket.status === 'CLOSED') {
+        closedAt = null;
+        reopenCount += 1;
+      }
     }
     // 1. Moving INTO Pending -> Pause SLA Clock
     if (new_status === 'PENDING' && ticket.status !== 'PENDING') {
@@ -809,19 +833,30 @@ router.post('/bulk-action', authenticateToken, async (req, res) => {
     for (const id of ticket_ids) {
       const ticket = await getOne('SELECT * FROM tickets WHERE id = ?', [id]);
       if (!ticket) {
-        results.push({ ticketId: id, success: false, reason: 'Ticket not found.' });
+        results.push({ ticket_id: id, success: false, message: 'Ticket not found.', reason: 'Ticket not found.' });
         continue;
       }
 
+      const resultBase = { ticket_id: id, ticket_number: ticket.ticket_number };
+      const fail = (reason) => results.push({ ...resultBase, success: false, message: reason, reason });
+
       if (action === 'REASSIGN') {
         if (user.role === 'AGENT') {
-          results.push({ ticketId: id, success: false, reason: 'Agents cannot reassign tickets to other agents.' });
+          fail('Agents cannot reassign tickets to other agents.');
           continue;
         }
 
         const newAssignee = target_assignee_id
           ? await getOne('SELECT name FROM users WHERE id = ?', [target_assignee_id])
           : null;
+        if (target_assignee_id && !newAssignee) {
+          fail('Target assignee does not exist.');
+          continue;
+        }
+        if (newAssignee && newAssignee.role !== 'AGENT') {
+          fail('Tickets can only be assigned to Agents.');
+          continue;
+        }
 
         await execute('UPDATE tickets SET primary_assignee_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [
           target_assignee_id || null,
@@ -838,21 +873,16 @@ router.post('/bulk-action', authenticateToken, async (req, res) => {
           details: `Bulk reassigned to ${newAssignee ? newAssignee.name : 'Unassigned'} by ${user.name}.`,
         });
 
-        results.push({ ticketId: id, ticketNumber: ticket.ticket_number, success: true, message: 'Reassigned successfully.' });
+        results.push({ ...resultBase, success: true, message: `Reassigned to ${newAssignee ? newAssignee.name : 'Unassigned'}.` });
       } else if (action === 'CLOSE') {
         const allowed = await userCanActOnTicket(user, ticket);
         if (!allowed) {
-          results.push({
-            ticketId: id,
-            ticketNumber: ticket.ticket_number,
-            success: false,
-            reason: 'Forbidden. You can only close tickets where you are the primary assignee or a collaborator.',
-          });
+          fail('Forbidden. You can only close tickets where you are the primary assignee or a collaborator.');
           continue;
         }
         const validation = validateStatusTransition(ticket.status, 'CLOSED', ticket.closed_at);
         if (!validation.valid) {
-          results.push({ ticketId: id, ticketNumber: ticket.ticket_number, success: false, reason: validation.reason });
+          fail(validation.reason);
           continue;
         }
 
@@ -871,9 +901,9 @@ router.post('/bulk-action', authenticateToken, async (req, res) => {
           details: `Bulk closed by ${user.name}.`,
         });
 
-        results.push({ ticketId: id, ticketNumber: ticket.ticket_number, success: true, message: 'Closed successfully.' });
+        results.push({ ...resultBase, success: true, message: 'Closed successfully.' });
       } else {
-        results.push({ ticketId: id, success: false, reason: 'Unknown bulk action.' });
+        fail('Unknown bulk action.');
       }
     }
 

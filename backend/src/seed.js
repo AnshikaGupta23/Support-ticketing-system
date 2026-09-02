@@ -8,33 +8,17 @@ export const seedDatabase = async () => {
 
   // Clear existing data cleanly (disabling foreign keys temporarily for clean reset)
   await execute('PRAGMA foreign_keys = OFF');
-  await execute('DELETE FROM sla_acknowledgments');
-  // Drop triggers temporarily if wiping ticket_history
-  await execute('DROP TRIGGER IF EXISTS prevent_history_update');
-  await execute('DROP TRIGGER IF EXISTS prevent_history_delete');
-  await execute('DELETE FROM ticket_history');
-  await execute('DELETE FROM replies');
-  await execute('DELETE FROM ticket_collaborators');
-  await execute('DELETE FROM tickets');
-  await execute('DELETE FROM users');
+  // Drop tables so the schema is rebuilt from src/db.js on the next initDb().
+  // DELETE-only resets leave stale columns behind (e.g. reopen_count) when an
+  // older database.sqlite already exists, which breaks the running app.
+  await execute('DROP TABLE IF EXISTS sla_acknowledgments');
+  await execute('DROP TABLE IF EXISTS ticket_history');
+  await execute('DROP TABLE IF EXISTS replies');
+  await execute('DROP TABLE IF EXISTS ticket_collaborators');
+  await execute('DROP TABLE IF EXISTS tickets');
+  await execute('DROP TABLE IF EXISTS users');
   await execute('PRAGMA foreign_keys = ON');
-
-  // Re-create immutable triggers
-  await execute(`
-    CREATE TRIGGER IF NOT EXISTS prevent_history_update
-    BEFORE UPDATE ON ticket_history
-    BEGIN
-      SELECT RAISE(FAIL, 'Ticket history timeline records are immutable and cannot be edited.');
-    END;
-  `);
-
-  await execute(`
-    CREATE TRIGGER IF NOT EXISTS prevent_history_delete
-    BEFORE DELETE ON ticket_history
-    BEGIN
-      SELECT RAISE(FAIL, 'Ticket history timeline records are immutable and cannot be deleted.');
-    END;
-  `);
+  await initDb();
 
   // Hash distinct passwords for each user
   const sarahHash = await bcrypt.hash('SarahPass#2026', 10);
