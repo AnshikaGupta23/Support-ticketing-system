@@ -1,5 +1,5 @@
 import bcrypt from 'bcryptjs';
-import { initDb, execute, getOne, query } from './db.js';
+import { initDb, execute } from './db.js';
 
 export const seedDatabase = async () => {
   console.log('🌱 Starting database seed process...');
@@ -43,22 +43,10 @@ export const seedDatabase = async () => {
   const davidHash = await bcrypt.hash('DavidPass#2026', 10);
 
   // Insert Users with distinct passwords
-  const sarahRes = await execute(
-    "INSERT INTO users (name, email, password_hash, role) VALUES ('Sarah Connor', 'sarah@company.com', ?, 'SUPERVISOR')",
-    [sarahHash]
-  );
-  const alexRes = await execute(
-    "INSERT INTO users (name, email, password_hash, role) VALUES ('Alex Mercer', 'alex@company.com', ?, 'AGENT')",
-    [alexHash]
-  );
-  const mayaRes = await execute(
-    "INSERT INTO users (name, email, password_hash, role) VALUES ('Maya Lin', 'maya@company.com', ?, 'AGENT')",
-    [mayaHash]
-  );
-  const davidRes = await execute(
-    "INSERT INTO users (name, email, password_hash, role) VALUES ('David Kim', 'david@company.com', ?, 'AGENT')",
-    [davidHash]
-  );
+  const sarahRes = await execute( `INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, ?)`, [ 'Sarah Connor', 'sarah@company.com', sarahHash, 'SUPERVISOR', ] );
+  const alexRes = await execute( `INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, ?)`, [ 'Alex Mercer', 'alex@company.com', alexHash, 'AGENT', ] );
+  const mayaRes = await execute( `INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, ?)`, [ 'Maya Lin', 'maya@company.com', mayaHash, 'AGENT', ] );
+  const davidRes = await execute( `INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, ?)`, [ 'David Kim', 'david@company.com', davidHash, 'AGENT', ] );
 
   const sarahId = sarahRes.lastID;
   const alexId = alexRes.lastID;
@@ -199,18 +187,22 @@ export const seedDatabase = async () => {
          VALUES (?, NULL, ?, ?, ?, 0, ?)`,
         [ticketId, t.requester_name, t.requester_email, t.description, t.created_at]
       );
-
+      await execute( `INSERT INTO replies ( ticket_id, author_id, author_name, author_email, body, is_internal_note, created_at ) VALUES (?, ?, ?, ?, ?, 1, ?)`, [ ticketId, alexId, 'Alex Mercer', 'alex@company.com', 'Investigating Stripe API webhooks payload right now.', hoursAgo(4), ] );
+      /*
       await execute(
         `INSERT INTO replies (ticket_id, author_id, author_name, author_email, body, is_internal_note, created_at)
          VALUES (?, ?, 'Alex Mercer', 'alex@company.com', 'Investigating Stripe API webhooks payload right now.', 1, ?)`,
         [ticketId, alexId, hoursAgo(4)]
       );
-
+      */
+      await execute( `INSERT INTO ticket_history ( ticket_id, actor_id, actor_name, action_type, details, created_at ) VALUES (?, ?, ?, ?, ?, ?)`, [ ticketId, alexId, 'Alex Mercer', 'INTERNAL_NOTE_ADDED', 'Added internal note regarding Stripe API payload.', hoursAgo(4), ] );
+      /*
       await execute(
         `INSERT INTO ticket_history (ticket_id, actor_id, actor_name, action_type, details, created_at)
          VALUES (?, ?, 'Alex Mercer', 'INTERNAL_NOTE_ADDED', 'Added internal note regarding Stripe API payload.', ?)`,
         [ticketId, alexId, hoursAgo(4)]
       );
+      */
     }
   }
 
@@ -220,8 +212,8 @@ export const seedDatabase = async () => {
 if (process.argv[1] && process.argv[1].endsWith('seed.js')) {
   seedDatabase()
     .then(() => process.exit(0))
-    .catch((err) => {
-      console.error('Seed failed:', err);
+    .catch((error) => {
+      console.error('Seed failed:', error);
       process.exit(1);
     });
 }

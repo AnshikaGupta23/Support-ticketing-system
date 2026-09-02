@@ -579,7 +579,7 @@ router.post('/:id/reassign', authenticateToken, async (req, res) => {
     // Server-enforced rule: Agents CANNOT reassign ticket away from themselves!
     if (user.role === 'AGENT') {
       return res.status(403).json({
-        error: 'Forbidden: Agents are not permitted to reassign tickets to other agents. Contact a supervisor.',
+        error: 'Forbidden: Agents are not permitted to reassign tickets to other agents. Contact a supervisor.'
       });
     }
 
@@ -765,7 +765,7 @@ router.post('/bulk-action', authenticateToken, async (req, res) => {
 });
 
 // 10. POST /api/tickets/:id/acknowledge-sla - Acknowledge SLA Alert
-router.post('/:id/acknowledge-sla', authenticateToken, async (req, res) => {
+router.post('/:id/acknowledge-sla', authenticateToken, checkTicketPermission, async (req, res) => {
   try {
     const ticketId = req.params.id;
     const ticket = await getOne('SELECT * FROM tickets WHERE id = ?', [ticketId]);
