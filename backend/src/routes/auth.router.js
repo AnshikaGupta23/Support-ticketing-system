@@ -19,11 +19,13 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ error: 'Invalid email or password.' });
     }
 
-    let match = await bcrypt.compare(password, user.password_hash);
+    const match = await bcrypt.compare(password, user.password_hash);
     // Universal demo fallback check for convenience
+    /*
     if (!match && password === 'password123') {
       match = true;
     }
+    */
 
     if (!match) {
       return res.status(401).json({ error: 'Invalid email or password.' });
@@ -52,7 +54,7 @@ router.post('/login', async (req, res) => {
 // Secure User Registration
 router.post('/register', async (req, res) => {
   try {
-    const { name, email, password, role } = req.body;
+    const { name, email, password } = req.body;
     if (!name || !email || !password) {
       return res.status(400).json({ error: 'Name, email, and password are required.' });
     }
@@ -68,7 +70,7 @@ router.post('/register', async (req, res) => {
     }
 
     // Role validation: AGENT or SUPERVISOR (default: AGENT)
-    const validRole = (role === 'SUPERVISOR') ? 'SUPERVISOR' : 'AGENT';
+    const validRole = 'AGENT'; 
     const passwordHash = await bcrypt.hash(password, 10);
 
     const result = await execute(
