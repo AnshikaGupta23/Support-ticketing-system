@@ -77,7 +77,7 @@ const DashboardView = () => {
         <div className="card">
           <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', fontWeight: 600 }}>Active Open Tickets</div>
           <div style={{ fontSize: '2rem', fontWeight: 800, color: '#4ade80', marginTop: '0.25rem' }}>
-            {stats.headlines.open_tickets}
+            {stats.headlines.openTickets}
           </div>
           <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>Requires agent action</div>
         </div>
@@ -85,7 +85,7 @@ const DashboardView = () => {
         <div className="card">
           <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', fontWeight: 600 }}>Pending on Customer</div>
           <div style={{ fontSize: '2rem', fontWeight: 800, color: '#fbbf24', marginTop: '0.25rem' }}>
-            {stats.headlines.pending_tickets}
+            {stats.headlines.pendingTickets}
           </div>
           <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>SLA timer paused</div>
         </div>
@@ -93,7 +93,7 @@ const DashboardView = () => {
         <div className="card">
           <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', fontWeight: 600 }}>Resolved This Week</div>
           <div style={{ fontSize: '2rem', fontWeight: 800, color: '#c084fc', marginTop: '0.25rem' }}>
-            {stats.headlines.resolved_this_week}
+            {stats.headlines.resolvedThisWeek}
           </div>
           <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>Completed lifecycle</div>
         </div>
@@ -149,7 +149,10 @@ const DashboardView = () => {
                 <Tooltip
                   contentStyle={{ background: '#1e293b', border: '1px solid #334155', borderRadius: '8px', color: '#fff' }}
                 />
-                <Bar dataKey="total" fill="#6366f1" radius={[4, 4, 0, 0]} name="Assigned Tickets" />
+                <Bar dataKey="open" stackId="workload" fill="#4ade80" name="Open" />
+                <Bar dataKey="pending" stackId="workload" fill="#fbbf24" name="Pending" />
+                <Bar dataKey="resolved" stackId="workload" fill="#c084fc" name="Resolved" />
+                <Legend />
               </BarChart>
             </ResponsiveContainer>
           </div>

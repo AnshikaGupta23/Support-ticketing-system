@@ -847,7 +847,7 @@ router.post('/bulk-action', authenticateToken, async (req, res) => {
         }
 
         const newAssignee = target_assignee_id
-          ? await getOne('SELECT name FROM users WHERE id = ?', [target_assignee_id])
+          ? await getOne('SELECT id, name, role FROM users WHERE id = ?', [target_assignee_id])
           : null;
         if (target_assignee_id && !newAssignee) {
           fail('Target assignee does not exist.');

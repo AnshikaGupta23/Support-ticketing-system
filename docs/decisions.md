@@ -28,3 +28,16 @@ This document records key decisions made during the design and development of th
 
 ---
 
+## Decision 4: Single Column Accumulated Pending Duration (Denormalization)
+- **Choice**: Maintain a `pending_duration_seconds` column and `pending_started_at` timestamp directly on the `tickets` table.
+- **Alternatives Evaluated**:
+  - *Calculating pending time dynamically from `ticket_history` timestamps*.
+- **Rationale**: Scanning historical rows on every paginated queue query creates O(N * H) performance bottlenecks. Storing accumulated pending time allows O(1) SLA calculation per ticket.
+
+---
+
+## Decision 5: [REVERSED DECISION] Client-Side Queue Filtering vs Server-Side Queue Filtering
+- **Initial Plan**: Load all open tickets into the browser memory on initial app load and perform client-side filtering/searching in JavaScript for fast client transitions.
+- **Reversal Rationale**: Requirement 6 explicitly states: *"All of this must happen on the server — do not load every ticket into the browser and filter there."* Client-side filtering breaks down at scale (thousands of tickets) and leaks unassigned/unauthorized ticket metadata.
+- **Final Architecture**: Refactored `GET /api/tickets` to perform SQL text searching (`LIKE`), column filtering, sorting, and OFFSET/LIMIT pagination entirely on the database server.
+
