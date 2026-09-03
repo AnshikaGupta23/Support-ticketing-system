@@ -13,8 +13,20 @@ const QueueView = () => {
   const [category, setCategory] = useState('');
   const [mineOnly, setMineOnly] = useState(false);
   const [archived, setArchived] = useState(false);
+  const [sortBy, setSortBy] = useState('created_at');
+  const [sortOrder, setSortOrder] = useState('DESC');
   const [page, setPage] = useState(1);
   const limit = 10;
+
+  const handleSortChange = (field) => {
+    if (sortBy === field) {
+      setSortOrder((o) => (o === 'ASC' ? 'DESC' : 'ASC'));
+    } else {
+      setSortBy(field);
+      setSortOrder(field === 'priority' ? 'ASC' : 'DESC');
+    }
+    setPage(1);
+  };
 
   // Agents are always scoped to their own tickets server-side.
   const isAgent = user?.role === 'AGENT';
@@ -63,6 +75,8 @@ const QueueView = () => {
         category: category || undefined,
         mine_only: mineOnly ? 'true' : undefined,
         is_archived: archived ? 'true' : 'false',
+        sort_by: sortBy,
+        sort_order: sortOrder,
       };
       const res = await api.get('/tickets', { params });
       setTickets(res.data.tickets);
@@ -76,7 +90,7 @@ const QueueView = () => {
 
   useEffect(() => {
     fetchQueue();
-  }, [page, search, status, priority, category, mineOnly, archived]);
+  }, [page, search, status, priority, category, mineOnly, archived, sortBy, sortOrder]);
 
   // Handle select all
   const handleSelectAll = (e) => {
@@ -129,6 +143,8 @@ const QueueView = () => {
         category,
         mine_only: mineOnly ? 'true' : '',
         is_archived: archived ? 'true' : 'false',
+        sort_by: sortBy,
+        sort_order: sortOrder,
       });
       const response = await api.get(`/tickets/export-csv?${params.toString()}`, {
         responseType: 'blob',
@@ -320,21 +336,43 @@ const QueueView = () => {
               <th>Ticket #</th>
               <th>Subject</th>
               <th>Status</th>
-              <th>Priority</th>
+              <th
+                className="sortable"
+                onClick={() => handleSortChange('priority')}
+                style={{ cursor: 'pointer', whiteSpace: 'nowrap' }}
+                title="Sort by priority"
+              >
+                Priority {sortBy === 'priority' && <span>{sortOrder === 'ASC' ? '▲' : '▼'}</span>}
+              </th>
               <th>Requester</th>
               <th>Assignee</th>
-              <th>Created</th>
+              <th
+                className="sortable"
+                onClick={() => handleSortChange('created_at')}
+                style={{ cursor: 'pointer', whiteSpace: 'nowrap' }}
+                title="Sort by created date"
+              >
+                Created {sortBy === 'created_at' && <span>{sortOrder === 'DESC' ? '▼' : '▲'}</span>}
+              </th>
+              <th
+                className="sortable"
+                onClick={() => handleSortChange('updated_at')}
+                style={{ cursor: 'pointer', whiteSpace: 'nowrap' }}
+                title="Sort by last updated"
+              >
+                Updated {sortBy === 'updated_at' && <span>{sortOrder === 'ASC' ? '▲' : '▼'}</span>}
+              </th>
               <th>Action</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan="9" style={{ textAlign: 'center', color: 'var(--text-muted)' }}>Loading tickets...</td>
+                <td colSpan="10" style={{ textAlign: 'center', color: 'var(--text-muted)' }}>Loading tickets...</td>
               </tr>
             ) : tickets.length === 0 ? (
               <tr>
-                <td colSpan="9" style={{ textAlign: 'center', color: 'var(--text-muted)' }}>No tickets matched query criteria.</td>
+                <td colSpan="10" style={{ textAlign: 'center', color: 'var(--text-muted)' }}>No tickets matched query criteria.</td>
               </tr>
             ) : (
               tickets.map((t) => (
@@ -371,6 +409,9 @@ const QueueView = () => {
                   </td>
                   <td style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
                     {new Date(t.created_at).toLocaleDateString()}
+                  </td>
+                  <td style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                    {new Date(t.updated_at).toLocaleDateString()}
                   </td>
                   <td>
                     <Link to={`/tickets/${t.id}`} className="btn btn-secondary btn-sm">

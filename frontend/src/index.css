@@ -325,6 +325,16 @@ textarea.form-control {
   border-bottom: 1px solid var(--border-color);
 }
 
+.table th.sortable {
+  cursor: pointer;
+  user-select: none;
+  transition: color 0.15s;
+}
+
+.table th.sortable:hover {
+  color: var(--primary);
+}
+
 .table td {
   padding: 0.85rem 1rem;
   border-bottom: 1px solid var(--border-color);

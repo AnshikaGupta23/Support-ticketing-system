@@ -1,16 +1,17 @@
 import { useState, useEffect } from 'react';
+import api from '../api';
 
 const DOCS_LIST = [
-  { id: 'SUBMISSION', title: 'Submission Details', path: '/SUBMISSION.md' },
-  { id: 'architecture', title: 'Architecture Blueprint', path: '/docs/architecture.md' },
-  { id: 'schema', title: 'Database Schema & Triggers', path: '/docs/schema.md' },
-  { id: 'plan', title: 'Plan & Hours Budget', path: '/docs/plan.md' },
-  { id: 'decisions', title: 'Architectural Decisions', path: '/docs/decisions.md' },
-  { id: 'ai-prompts', title: 'AI Engineering Prompt Log', path: '/docs/ai-prompts.md' },
+  { id: 'submission', title: 'Submission Details', path: '/docs/submission' },
+  { id: 'architecture', title: 'Architecture Blueprint', path: '/docs/architecture' },
+  { id: 'schema', title: 'Database Schema & Triggers', path: '/docs/schema' },
+  { id: 'plan', title: 'Plan & Hours Budget', path: '/docs/plan' },
+  { id: 'decisions', title: 'Architectural Decisions', path: '/docs/decisions' },
+  { id: 'ai-prompts', title: 'AI Engineering Prompt Log', path: '/docs/ai-prompts' },
 ];
 
 const DocsViewerModal = ({ isOpen, onClose }) => {
-  const [activeTab, setActiveTab] = useState('SUBMISSION');
+  const [activeTab, setActiveTab] = useState('submission');
   const [content, setContent] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -19,13 +20,10 @@ const DocsViewerModal = ({ isOpen, onClose }) => {
     const doc = DOCS_LIST.find((d) => d.id === activeTab);
     if (doc) {
       setLoading(true);
-      fetch(doc.path)
-        .then((res) => {
-          if (!res.ok) throw new Error('Failed to load document');
-          return res.text();
-        })
-        .then((text) => setContent(text))
-        .catch((err) => setContent(`Error loading document: ${err.message}`))
+      api
+        .get(doc.path, { responseType: 'text' })
+        .then((res) => setContent(res.data))
+        .catch((err) => setContent(`Error loading document: ${err.response?.data?.error || err.message}`))
         .finally(() => setLoading(false));
     }
   }, [activeTab, isOpen]);
