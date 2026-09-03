@@ -190,7 +190,53 @@ router.get('/', authenticateToken, async (req, res) => {
   }
 });
 
-// 2. GET /api/tickets/export-csv - Download Queue as CSV
+// 2. GET /api/tickets/alerts - SLA Alert Center (scenario 10)
+// Server-computed list of tickets that are breaching or about to breach their
+// target response time and have NOT yet been acknowledged for the current
+// breach. Agents only see alerts for tickets assigned to them; supervisors see
+// every unacknowledged alert. Resolved/closed tickets are excluded (a closed
+// ticket no longer needs action, and acknowledgement is cleared by resolve).
+router.get('/alerts', authenticateToken, async (req, res) => {
+  try {
+    const user = req.user;
+    const rows = await query(
+      `SELECT t.*, u.name as primary_assignee_name, u.email as primary_assignee_email
+       FROM tickets t
+       LEFT JOIN users u ON t.primary_assignee_id = u.id
+       WHERE t.is_archived = 0
+         AND t.status IN ('NEW', 'OPEN', 'PENDING')
+         ${user.role === 'AGENT' ? 'AND t.primary_assignee_id = ?' : ''}`,
+      user.role === 'AGENT' ? [user.id] : []
+    );
+
+    const alerts = [];
+    for (const ticket of rows) {
+      const sla = calculateSLA(ticket);
+      if (!sla.isBreached && !sla.isNearBreach) continue;
+
+      // Suppress alerts the assigned agent has already acknowledged for the
+      // current breach. Supervisors see the alert until the assignee acks.
+      if (ticket.primary_assignee_id) {
+        const ack = await getOne(
+          'SELECT 1 FROM sla_acknowledgments WHERE ticket_id = ? AND user_id = ? AND breach_count = ?',
+          [ticket.id, ticket.primary_assignee_id, ticket.reopen_count || 0]
+        );
+        if (ack) continue;
+      }
+
+      alerts.push({ ...ticket, sla });
+    }
+
+    res.json({
+      alerts,
+      count: alerts.length,
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch SLA alerts.', details: err.message });
+  }
+});
+
+// 3. GET /api/tickets/export-csv - Download Queue as CSV
 router.get('/export-csv', authenticateToken, async (req, res) => {
   try {
     const { status, priority, category, is_archived = 'false', search = '' } = req.query;
@@ -588,7 +634,12 @@ router.post('/:id/status', authenticateToken, checkTicketPermission, async (req,
         closedAt = null;
         reopenCount += 1;
       }
+      // Scenario 10: reopening a ticket means the previous lifecycle concluded.
+      // Any acknowledgment from before the reopen no longer applies — if the
+      // ticket breaches its target response time again, the alert must return.
+      await execute('DELETE FROM sla_acknowledgments WHERE ticket_id = ?', [ticketId]);
     }
+
     // 1. Moving INTO Pending -> Pause SLA Clock
     if (new_status === 'PENDING' && ticket.status !== 'PENDING') {
       pendingStartedAt = nowIso;
@@ -685,6 +736,16 @@ router.post('/:id/reassign', authenticateToken, async (req, res) => {
     await execute(
       'UPDATE tickets SET primary_assignee_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
       [new_assignee_id || null, ticketId]
+    );
+
+    // Scenario 10: acknowledgments are scoped to the assigned agent. When a
+    // ticket is reassigned (or unassigned) the old assignee's acknowledgment no
+    // longer applies: the new assignee must acknowledge any active alert for
+    // themselves. Rows for the new assignee are preserved; other users' acks
+    // for this ticket are removed.
+    await execute(
+      'DELETE FROM sla_acknowledgments WHERE ticket_id = ? AND user_id != ?',
+      [ticketId, new_assignee_id || -1]
     );
 
     await recordHistory({
@@ -863,6 +924,13 @@ router.post('/bulk-action', authenticateToken, async (req, res) => {
           id,
         ]);
 
+        // Scenario 10: reassignment transfers the alert to the new assignee —
+        // remove acknowledgments held by anyone other than the new assignee.
+        await execute(
+          'DELETE FROM sla_acknowledgments WHERE ticket_id = ? AND user_id != ?',
+          [id, target_assignee_id || -1]
+        );
+
         await recordHistory({
           ticketId: id,
           actorId: user.id,
@@ -914,17 +982,33 @@ router.post('/bulk-action', authenticateToken, async (req, res) => {
 });
 
 // 10. POST /api/tickets/:id/acknowledge-sla - Acknowledge SLA Alert
-router.post('/:id/acknowledge-sla', authenticateToken, checkTicketPermission, async (req, res) => {
+// Scenario 10: Only the agent the ticket is assigned to may acknowledge its
+// alert. Collaborators and supervisors (who are not the assignee) cannot clear
+// another agent's SLA alert.
+router.post('/:id/acknowledge-sla', authenticateToken, async (req, res) => {
   try {
     const ticketId = req.params.id;
     const ticket = await getOne('SELECT * FROM tickets WHERE id = ?', [ticketId]);
     if (!ticket) return res.status(404).json({ error: 'Ticket not found.' });
+
+    if (!ticket.primary_assignee_id) {
+      return res.status(400).json({ error: 'This ticket is unassigned and has no assignee agent to acknowledge its SLA alert.' });
+    }
+    if (req.user.id !== ticket.primary_assignee_id) {
+      return res.status(403).json({
+        error: 'Forbidden: Only the agent assigned to this ticket can acknowledge its SLA alert.',
+      });
+    }
 
     const sla = calculateSLA(ticket);
     if (!sla.isBreached && !sla.isNearBreach) {
       return res.status(400).json({ error: 'This ticket has no active SLA alert to acknowledge.' });
     }
 
+    // Acknowledgment is scoped to the ticket's current assignee. It is stored
+    // against the current breach "generation" (reopen_count) so that if the
+    // ticket is resolved/closed while acked and later reopened into a fresh
+    // breach, the alert correctly returns and must be acknowledged again.
     await execute(
       `INSERT OR REPLACE INTO sla_acknowledgments (ticket_id, user_id, acknowledged_at, breach_count)
        VALUES (?, ?, CURRENT_TIMESTAMP, ?)`,
@@ -941,7 +1025,7 @@ router.post('/:id/acknowledge-sla', authenticateToken, checkTicketPermission, as
 
     res.json({ message: 'SLA alert acknowledged.' });
   } catch (err) {
-    res.status(500).json({ error: 'Failed to acknowledge SLA alert.' });
+    res.status(500).json({ error: 'Failed to acknowledge SLA alert.', details: err.message });
   }
 });
 

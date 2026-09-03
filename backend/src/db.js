@@ -133,6 +133,25 @@ export const initDb = async () => {
         END;
       `);
 
+      // Scenario 9: Replies (customer-visible and internal notes) are part of
+      // the ticket timeline and must be immutable too. A reply that was posted
+      // is never editable or deletable, regardless of role.
+      db.run(`
+        CREATE TRIGGER IF NOT EXISTS prevent_reply_update
+        BEFORE UPDATE ON replies
+        BEGIN
+          SELECT RAISE(FAIL, 'Replies are part of the immutable ticket timeline and cannot be edited.');
+        END;
+      `);
+
+      db.run(`
+        CREATE TRIGGER IF NOT EXISTS prevent_reply_delete
+        BEFORE DELETE ON replies
+        BEGIN
+          SELECT RAISE(FAIL, 'Replies are part of the immutable ticket timeline and cannot be deleted.');
+        END;
+      `);
+
       // Create SLA Acknowledgments Table
       db.run(`
         CREATE TABLE IF NOT EXISTS sla_acknowledgments (

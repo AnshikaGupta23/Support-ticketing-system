@@ -1,34 +1,18 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../api';
+import { useAuth } from '../context/AuthContext';
 
 const SlaAlertsView = () => {
-  const [breachedTickets, setBreachedTickets] = useState([]);
+  const { user } = useAuth();
+  const [alerts, setAlerts] = useState([]);
   const [loading, setLoading] = useState(true);
 
   const fetchAlerts = async () => {
     setLoading(true);
     try {
-      const res = await api.get('/tickets', { params: { limit: 100 } });
-      // filter breached or near breach tickets
-      const allTickets = res.data.tickets || [];
-
-      // Fetch SLA details for each active open ticket
-      const alerts = [];
-      for (const t of allTickets) {
-        if (t.status !== 'RESOLVED' && t.status !== 'CLOSED') {
-          try {
-            const detailRes = await api.get(`/tickets/${t.id}`);
-            const clock = detailRes.data.sla;
-            if (clock &&(clock.isBreached || clock.isNearBreach) && !detailRes.data.acknowledgedForCurrentBreach) {
-              alerts.push({ ...t, sla_clock: clock });
-            }
-          } catch (e) {
-            console.error(e);
-          }
-        }
-      }
-      setBreachedTickets(alerts);
+      const res = await api.get('/tickets/alerts');
+      setAlerts(res.data.alerts || []);
     } catch (err) {
       console.error('Failed to load SLA alerts:', err);
     } finally {
@@ -38,6 +22,8 @@ const SlaAlertsView = () => {
 
   useEffect(() => {
     fetchAlerts();
+    const interval = setInterval(fetchAlerts, 15000); // live refresh
+    return () => clearInterval(interval);
   }, []);
 
   const handleAcknowledge = async (ticketId) => {
@@ -49,12 +35,21 @@ const SlaAlertsView = () => {
     }
   };
 
+  const isAssignee = (t) => t.primary_assignee_id === user?.id;
+  const isAgent = user?.role === 'AGENT';
+  // Acknowledge is reserved for the assigned agent (scenario 10). Supervisors
+  // can monitor and reassign, but they cannot snooze another agent's alert.
+  const canAck = (t) => !isAgent || isAssignee(t);
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
       <div>
         <h1 style={{ fontSize: '1.5rem', fontWeight: 800 }}>⚡ SLA Alerts & Breach Center</h1>
         <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
           Active monitoring center for tickets approaching or exceeding SLA target resolution windows.
+          {isAgent
+            ? ' You are seeing alerts for tickets assigned to you.'
+            : ' Supervisors see every unacknowledged alert across the queue.'}
         </p>
       </div>
 
@@ -94,51 +89,57 @@ const SlaAlertsView = () => {
               <tr>
                 <td colSpan="8" style={{ textAlign: 'center', color: 'var(--text-muted)' }}>Scanning SLA clock engines...</td>
               </tr>
-            ) : breachedTickets.length === 0 ? (
+            ) : alerts.length === 0 ? (
               <tr>
                 <td colSpan="8" style={{ textAlign: 'center', color: 'var(--success)' }}>
                   🎉 Excellent! Zero tickets are currently breaching SLA targets.
                 </td>
               </tr>
             ) : (
-              breachedTickets.map((t) => (
-                <tr key={t.id}>
-                  <td>
-                    <code style={{ fontWeight: 700, color: 'var(--primary)' }}>{t.ticket_number}</code>
-                  </td>
-                  <td>
-                    <Link to={`/tickets/${t.id}`} style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
-                      {t.subject}
-                    </Link>
-                  </td>
-                  <td>
-                    <span className={`badge badge-${t.priority.toLowerCase()}`}>{t.priority}</span>
-                  </td>
-                  <td>
-                    <span className={`badge ${t.sla_clock.isBreached ? 'badge-urgent' : 'badge-high'}`}>
-                      {t.sla_clock.slaState}
-                    </span>
-                  </td>
-                  <td style={{ fontWeight: 700, color: 'var(--danger)' }}>
-                    {(t.sla_clock.activeElapsedSeconds / 3600).toFixed(1)} hrs
-                  </td>
-                  <td style={{ color: 'var(--text-muted)' }}>{t.sla_clock.targetHours} hrs</td>
-                  <td>{t.primary_assignee_name || 'Unassigned'}</td>
-                  <td>
-                    <div style={{ display: 'flex', gap: '0.5rem' }}>
-                      <Link to={`/tickets/${t.id}`} className="btn btn-secondary btn-sm">
-                        View
+              alerts.map((t) => {
+                const clock = t.sla || {};
+                const allowAck = canAck(t);
+                return (
+                  <tr key={t.id}>
+                    <td>
+                      <code style={{ fontWeight: 700, color: 'var(--primary)' }}>{t.ticket_number}</code>
+                    </td>
+                    <td>
+                      <Link to={`/tickets/${t.id}`} style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
+                        {t.subject}
                       </Link>
-                      <button
-                        className="btn btn-primary btn-sm"
-                        onClick={() => handleAcknowledge(t.id)}
-                      >
-                        Acknowledge
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))
+                    </td>
+                    <td>
+                      <span className={`badge badge-${t.priority.toLowerCase()}`}>{t.priority}</span>
+                    </td>
+                    <td>
+                      <span className={`badge ${clock.isBreached ? 'badge-urgent' : 'badge-high'}`}>
+                        {clock.slaState}
+                      </span>
+                    </td>
+                    <td style={{ fontWeight: 700, color: clock.isBreached ? 'var(--danger)' : 'var(--warning)' }}>
+                      {(clock.activeElapsedSeconds / 3600).toFixed(1)} hrs
+                    </td>
+                    <td style={{ color: 'var(--text-muted)' }}>{clock.targetHours} hrs</td>
+                    <td>{t.primary_assignee_name || 'Unassigned'}</td>
+                    <td>
+                      <div style={{ display: 'flex', gap: '0.5rem' }}>
+                        <Link to={`/tickets/${t.id}`} className="btn btn-secondary btn-sm">
+                          View
+                        </Link>
+                        <button
+                          className="btn btn-primary btn-sm"
+                          onClick={() => handleAcknowledge(t.id)}
+                          disabled={!allowAck}
+                          title={allowAck ? '' : 'Only the assigned agent can acknowledge this alert.'}
+                        >
+                          {isAgent && !isAssignee(t) ? 'Not Your Ticket' : 'Acknowledge'}
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })
             )}
           </tbody>
         </table>

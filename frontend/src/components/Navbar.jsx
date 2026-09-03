@@ -11,8 +11,8 @@ const Navbar = ({ onOpenDocs }) => {
   useEffect(() => {
     const fetchBreaches = async () => {
       try {
-        const res = await api.get('/dashboard/stats');
-        setBreachCount(res.data.headlines?.breachingResponseTime || 0);
+        const res = await api.get('/tickets/alerts');
+        setBreachCount(res.data.count || 0);
       } catch (err) {
         console.error('Error loading SLA counts:', err);
       }
