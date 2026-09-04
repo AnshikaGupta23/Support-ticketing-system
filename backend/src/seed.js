@@ -1,24 +1,30 @@
 import bcrypt from 'bcryptjs';
-import { initDb, execute } from './db.js';
+import { initDb, execute, query, USE_POSTGRES } from './db.js';
 
 export const seedDatabase = async () => {
   console.log('🌱 Starting database seed process...');
 
   await initDb();
 
-  // Clear existing data cleanly (disabling foreign keys temporarily for clean reset)
-  await execute('PRAGMA foreign_keys = OFF');
-  // Drop tables so the schema is rebuilt from src/db.js on the next initDb().
-  // DELETE-only resets leave stale columns behind (e.g. reopen_count) when an
-  // older database.sqlite already exists, which breaks the running app.
-  await execute('DROP TABLE IF EXISTS sla_acknowledgments');
-  await execute('DROP TABLE IF EXISTS ticket_history');
-  await execute('DROP TABLE IF EXISTS replies');
-  await execute('DROP TABLE IF EXISTS ticket_collaborators');
-  await execute('DROP TABLE IF EXISTS tickets');
-  await execute('DROP TABLE IF EXISTS users');
-  await execute('PRAGMA foreign_keys = ON');
-  await initDb();
+  if (USE_POSTGRES) {
+    // Postgres: no table drops (shared DB + foreign keys). Delete in FK-safe
+    // order, then reseed. The schema/triggers persist from initDb().
+    await execute('TRUNCATE sla_acknowledgments, ticket_history, replies, ticket_collaborators, tickets, users RESTART IDENTITY CASCADE');
+  } else {
+    // Clear existing data cleanly (disabling foreign keys temporarily for clean reset)
+    await execute('PRAGMA foreign_keys = OFF');
+    // Drop tables so the schema is rebuilt from src/db.js on the next initDb().
+    // DELETE-only resets leave stale columns behind (e.g. reopen_count) when an
+    // older database.sqlite already exists, which breaks the running app.
+    await execute('DROP TABLE IF EXISTS sla_acknowledgments');
+    await execute('DROP TABLE IF EXISTS ticket_history');
+    await execute('DROP TABLE IF EXISTS replies');
+    await execute('DROP TABLE IF EXISTS ticket_collaborators');
+    await execute('DROP TABLE IF EXISTS tickets');
+    await execute('DROP TABLE IF EXISTS users');
+    await execute('PRAGMA foreign_keys = ON');
+    await initDb();
+  }
 
   // Hash distinct passwords for each user
   const sarahHash = await bcrypt.hash('SarahPass#2026', 10);

@@ -3,7 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { initDb } from './db.js';
+import { initDb, isSeeded } from './db.js';
 
 import authRouter from './routes/auth.router.js';
 import ticketsRouter from './routes/tickets.router.js';
@@ -90,8 +90,14 @@ app.use((err, req, res, next) => {
 const startServer = async () => {
   try {
     await initDb();
-    // Auto seed if empty
-    await seedDatabase();
+    // Auto-seed only when empty, so a shared Postgres database is never wiped
+    // on boot (local SQLite dev still reseeds fresh each run).
+    const hasData = await isSeeded();
+    if (!hasData) {
+      await seedDatabase();
+    } else {
+      console.log('Database already seeded — skipping seed.');
+    }
 
     app.listen(PORT, () => {
       console.log(`🚀 Support Ticketing API Server running on http://localhost:${PORT}`);
