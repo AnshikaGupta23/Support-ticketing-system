@@ -41,3 +41,21 @@ This document records key decisions made during the design and development of th
 - **Reversal Rationale**: Requirement 6 explicitly states: *"All of this must happen on the server — do not load every ticket into the browser and filter there."* Client-side filtering breaks down at scale (thousands of tickets) and leaks unassigned/unauthorized ticket metadata.
 - **Final Architecture**: Refactored `GET /api/tickets` to perform SQL text searching (`LIKE`), column filtering, sorting, and OFFSET/LIMIT pagination entirely on the database server.
 
+---
+
+## Decision 6: SLA Acknowledgment Scope & Lifecycle Reset (Scenario 10)
+- **Choice**: SLA acknowledgment is owned by the ticket's current primary assignee and is cleared whenever the alert context changes.
+  - Only the assigned agent may acknowledge an alert (`POST /api/tickets/:id/acknowledge-sla` returns 403 to anyone else, including supervisors).
+  - Reassignment/unassignment deletes acknowledgments held by any user other than the new assignee, so the new assignee must acknowledge the active alert themselves.
+  - Reopening a ticket (RESOLVED/CLOSED -> OPEN) deletes all prior acknowledgments, so a reopened ticket that breaches its target response time again re-enters the alert list as required.
+- **Alternatives Evaluated**:
+  - *Global acknowledgement by any supervisor*: Would let a supervisor silently snooze an alert that the responsible agent still needs to act on.
+  - *Keying acknowledgments to a monotonically increasing reopen counter only*: Works for reopen cycles but leaves stale acks from a previous assignee suppressing the alert after reassignment.
+- **Rationale**: The requirement says *"An agent can acknowledge an alert for a ticket assigned to them"* — scoping the ack to the assignee and resetting it on reassignment/reopen keeps the alert list honest for whoever currently owns the ticket.
+
+## Decision 7: Reply Immutability Extended to the Replies Table (Scenario 9)
+- **Choice**: Apply the same storage-level `BEFORE UPDATE` / `BEFORE DELETE` SQLite triggers to the `replies` table that already protect `ticket_history`.
+- **Alternatives Evaluated**:
+  - *Protecting only `ticket_history`*: Replies are mirrored into history as events, but the reply bodies themselves would remain editable/deletable at the storage layer, which contradicts "every reply, internal or customer-visible ... cannot be edited or deleted after the fact."
+- **Rationale**: Requirement 9 names replies explicitly. Extending the immutable-timeline guarantee to the replies table means no path — API, supervisor, or raw SQL — can rewrite or remove a posted reply or internal note.
+

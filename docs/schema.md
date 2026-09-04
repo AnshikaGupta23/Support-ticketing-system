@@ -92,8 +92,17 @@ The relational schema is implemented in SQLite with strict foreign keys, check c
   CREATE TRIGGER prevent_history_delete BEFORE DELETE ON ticket_history
   BEGIN SELECT RAISE(FAIL, 'Ticket history timeline records are immutable and cannot be deleted.'); END;
   ```
+- **Reply Immutability (Scenario 9)**: Replies — customer-visible and internal notes — are part of the ticket timeline, so the same storage-level guards protect the `replies` table:
+  ```sql
+  CREATE TRIGGER prevent_reply_update BEFORE UPDATE ON replies
+  BEGIN SELECT RAISE(FAIL, 'Replies are part of the immutable ticket timeline and cannot be edited.'); END;
+
+  CREATE TRIGGER prevent_reply_delete BEFORE DELETE ON replies
+  BEGIN SELECT RAISE(FAIL, 'Replies are part of the immutable ticket timeline and cannot be deleted.'); END;
+  ```
 - **Application vs Database Constraints**:
   - State machine transitions (`NEW` -> `OPEN` -> `PENDING` -> `RESOLVED` -> `CLOSED` and 7-day reopening window) are enforced in application logic to provide explicit human-readable error messages to clients.
+  - SLA acknowledgment ownership and lifecycle resets (on reassignment/reopen) are enforced in application logic.
 
 ---
 
