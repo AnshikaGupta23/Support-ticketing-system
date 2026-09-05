@@ -8,7 +8,7 @@
 
 ## Notes for the reviewer
 
-Live on free tiers. **Database:** Supabase Postgres — the backend uses it whenever `DATABASE_URL` is set (the db layer auto-translates SQLite queries/triggers to Postgres). **Server-side:** Render — Express API; on boot it creates the schema and seeds the demo data only if the DB is empty, so a shared database is never wiped. **Browser-side:** Vercel — React/Vite SPA with rewrites to `index.html`, built with `VITE_API_URL` pointing at the Render API origin. `POST /api/seed` can re-seed the demo data on demand. Local dev still works unchanged (SQLite + `npm run dev`).
+Live on free tiers. **Database:** Supabase Postgres — the backend uses it whenever `DATABASE_URL` is set (it translates SQLite queries and triggers to Postgres automatically). **Server-side:** Render — Express API; on startup it creates the tables and seeds the demo data only if the database is empty, so the shared data is never wiped. **Browser-side:** Vercel — React/Vite SPA with rewrites to `index.html`, built with `VITE_API_URL` pointing at the Render API. `POST /api/seed` re-seeds the demo data on demand. Local development still works unchanged (SQLite + `npm run dev`).
 
 ## Demo credentials
 
@@ -23,10 +23,10 @@ Live on free tiers. **Database:** Supabase Postgres — the backend uses it when
 
 | Layer | What you used | Why |
 |-------|---------------|-----|
-| Frontend | React 19 + Vite, React Router, Recharts, axios | Component SPA with charts for the dashboard; role-aware UI that hides nothing it can't back with server checks. |
-| Backend | Node.js + Express, JWT (jsonwebtoken), bcryptjs | Lightweight REST API; middleware makes per-route RBAC and state-machine enforcement straightforward. |
-| Database | Postgres on Supabase (free tier); SQLite via `sqlite3` for local dev | Single managed Postgres for the live site; the backend's hybrid adapter (same routers both modes) runs Postgres when `DATABASE_URL` is set, with triggers recreated natively for storage-level immutability. |
-| Hosting | Supabase (managed Postgres) + Render (Node/Express API) + Vercel (React/Vite UI) — all free tiers | API and UI are separated so each host does one job; auto-seeds only on an empty DB so Render reboots never wipe shared data; Vercel SPA rewrites + `VITE_API_URL` wire the browser to the API. |
+| Frontend | React 19 + Vite, React Router, Recharts, axios | SPA with charts for the dashboard; the UI hides nothing the server doesn't also check. |
+| Backend | Node.js + Express, JWT (jsonwebtoken), bcryptjs | Lightweight REST API; per-route role checks and state-machine rules are easy to enforce. |
+| Database | Postgres on Supabase (free tier); SQLite via `sqlite3` for local dev | One managed Postgres for the live site; the same backend code runs on SQLite locally and Postgres in production (triggers are recreated to keep history immutable). |
+| Hosting | Supabase (managed Postgres) + Render (Node/Express API) + Vercel (React/Vite UI) — all free tiers | API and UI are hosted separately so each service does one job; it only auto-seeds when the DB is empty, so restarts never wipe data; Vercel's rewrites and `VITE_API_URL` connect the UI to the API. |
 
 ## Goal checklist
 
@@ -34,10 +34,10 @@ Mark each honestly. Partial is fine — say what is partial.
 
 | # | Goal | Status | Notes |
 |---|------|--------|-------|
-| 1 | Accounts with Supervisor and Agent roles, RBAC enforced server-side | Done | JWT on every route; agents scoped to tickets they own or collaborate on; agents cannot create-for-other agents or reassign away from self (HTTP 403). |
+| 1 | Accounts with Supervisor and Agent roles, RBAC enforced server-side | Done | JWT on every route; agents only see tickets they own or collaborate on; they can't create-for-other agents or reassign away from themselves (HTTP 403). |
 | 2 | Ticket create / edit / detail with reassignment and collaborators | Done | Agents may only assign to self or leave unassigned; collaborators must be Agents; primary assignee can't also be a collaborator. |
 | 3 | Archive and restore without permanent deletion | Done | Soft `is_archived` flag; archived tickets hidden from the default queue and dashboard, still filterable. |
-| 4 | Ticket lifecycle state machine with reopening rules | Done | `NEW → OPEN → PENDING → RESOLVED → CLOSED`; illegal moves return 400 with allowed transitions; CLOSED reopen limited to 7 days; same-state moves are idempotent no-ops. |
+| 4 | Ticket lifecycle state machine with reopening rules | Done | `NEW → OPEN → PENDING → RESOLVED → CLOSED`; illegal moves return 400 with allowed transitions; CLOSED reopen limited to 7 days; same-state moves are no-ops. |
 | 5 | Replies, staff-only internal notes, customer replies | Done | Customer reply to a PENDING ticket auto-returns it to OPEN and resumes the SLA clock; internal notes never trigger that. |
 | 6 | Server-side queue search, filter, sort, pagination + CSV export | Done | All in SQL — the browser is never handed the full dataset; agents are always server-scoped; CSV export mirrors the active filters. |
 | 7 | Bulk actions with per-ticket reporting | Done | Bulk reassign (Supervisor) and bulk close; each ticket validated independently, response reports success/refusal per ticket with reasons. |
@@ -48,18 +48,17 @@ Mark each honestly. Partial is fine — say what is partial.
 
 ## How much time did you actually spend?
 
-About 10.5 hours across 5 sessions: requirement analysis & architecture (1.5h), schema/triggers/auth (2h), REST API — state machine, SLA engine, bulk actions (2.5h), React frontend — queue, detail view, dashboard, alerts (3h), and docs, edge-case testing & seed data (1.5h).
+About 10.5 hours across 5 sessions: requirement analysis & architecture (1.5h), schema/triggers/auth (2h), REST API — state machine, SLA engine, bulk actions (2.5h), React frontend — queue, detail view, dashboard, alerts (3h), and docs, edge-case testing & seed data (1.5h). On top of that, ~2.5 hours went into deployment work — sorting out the hosting setup and getting the live links (Supabase + Render + Vercel) working.
 
 ## What would you do next, with another 12 hours?
 
-- Add a real automated test framework (Vitest/Jest) and CI so the state machine, SLA math, and RBAC rules are regression-tested on every change (currently a standalone `test-api.js` script).
+- Set up a proper automated test framework (Vitest/Jest) with CI, so the state machine, SLA math, and role checks get tested on every change (right now they run via a single `test-api.js` script).
 - Add the deferred stretch features: canned responses, customer satisfaction surveys, and an incident status page.
 - Realtime updates via WebSockets instead of 15s/30s polling for SLA timers and the alert badge.
 - Integrate an AI chatbot into the app — draft reply suggestions for agents from the ticket thread, and let customers get instant answers to common questions before they raise a ticket.
 
 ## What are you least happy with in this codebase, and why?
 
-- **Testing is still manual.** The tests live in one standalone script (`backend/src/test-api.js`) instead of a proper test runner wired into CI, so the trickiest logic (SLA pause/resume, ack reset, immutability triggers) only gets checked when someone remembers to run it.
-- **`POST /api/seed` has no login check.** It's handy for demos, but anyone who can reach the server can wipe and re-fill the database — acceptable on local, a real risk on the live URL. Should be gated behind a supervisor token or disabled in production.
-- **The live API URL comes from a build-time `VITE_API_URL`**, so pointing the UI at a different backend means rebuilding the frontend (rather than a runtime setting).
-- **Some database indexes are missing.** The schema relies on primary/unique keys only, so the paginated queue query will slow down as tickets grow — the docs describe the needed composite index but it isn't created yet.
+- **Testing is still manual.** The tests live in one standalone script (`backend/src/test-api.js`) instead of a test runner wired into CI — a Vitest/Jest setup with the state-machine, SLA, and role-check suites in CI would make future changes safer.
+- **The `POST /api/seed` reset endpoint has no auth guard.** It's convenient for demos, and the deployed backend only auto-seeds when the database is empty, so it's low-risk in practice — but protecting it with a Supervisor token would make the live setup fully tidy.
+- **Some database indexes are missing.** The schema uses primary/unique keys plus the main query indexes already added for Postgres; the composite index described in the docs would keep the paginated queue fast as ticket volume grows.
