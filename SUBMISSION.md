@@ -2,12 +2,13 @@
 
 ## Links
 
-- **GitHub repository:** <public repo URL>
-- **Live application:** <deployed URL>
+- **GitHub repository:** https://github.com/AnshikaGupta23/Support-ticketing-system
+- **Live application (Vercel):** https://support-ticketing-system-alpha.vercel.app/login
+- **Live API (Render):** https://support-ticketing-system-jcp5.onrender.com
 
 ## Notes for the reviewer
 
-No live host yet — run it locally. Backend: `cd backend && npm install && npm run seed && npm run start` (API on http://localhost:5000). Frontend: `cd frontend && npm install && npm run dev` (UI on http://localhost:5173). The backend auto-seeds an empty database on first startup, and `npm run seed` resets it to the full demo set (4 users, 6 tickets). All setup steps are also in the repo README.
+Live on free tiers. **Database:** Supabase Postgres — the backend uses it whenever `DATABASE_URL` is set (the db layer auto-translates SQLite queries/triggers to Postgres). **Server-side:** Render — Express API; on boot it creates the schema and seeds the demo data only if the DB is empty, so a shared database is never wiped. **Browser-side:** Vercel — React/Vite SPA with rewrites to `index.html`, built with `VITE_API_URL` pointing at the Render API origin. `POST /api/seed` can re-seed the demo data on demand. Local dev still works unchanged (SQLite + `npm run dev`).
 
 ## Demo credentials
 
@@ -24,8 +25,8 @@ No live host yet — run it locally. Backend: `cd backend && npm install && npm 
 |-------|---------------|-----|
 | Frontend | React 19 + Vite, React Router, Recharts, axios | Component SPA with charts for the dashboard; role-aware UI that hides nothing it can't back with server checks. |
 | Backend | Node.js + Express, JWT (jsonwebtoken), bcryptjs | Lightweight REST API; middleware makes per-route RBAC and state-machine enforcement straightforward. |
-| Database | SQLite via `sqlite3` | Zero-config, single-file, portable; `BEFORE UPDATE/DELETE` triggers give storage-level immutability guarantees. |
-| Hosting | None — runs locally | Deployment was out of scope for this exercise; no infra-specific coupling, so it can be hosted later as-is. |
+| Database | Postgres on Supabase (free tier); SQLite via `sqlite3` for local dev | Single managed Postgres for the live site; the backend's hybrid adapter (same routers both modes) runs Postgres when `DATABASE_URL` is set, with triggers recreated natively for storage-level immutability. |
+| Hosting | Supabase (managed Postgres) + Render (Node/Express API) + Vercel (React/Vite UI) — all free tiers | API and UI are separated so each host does one job; auto-seeds only on an empty DB so Render reboots never wipe shared data; Vercel SPA rewrites + `VITE_API_URL` wire the browser to the API. |
 
 ## Goal checklist
 
@@ -43,6 +44,7 @@ Mark each honestly. Partial is fine — say what is partial.
 | 8 | SLA engine with paused pending time and alert list | Done | Clock counts active time only (URGENT 2h, HIGH 4h, MEDIUM 24h, LOW 48h); alert center is role-scoped with live nav badge; SLA math is server-side everywhere. |
 | 9 | Immutable history timeline | Done | Every action appends a `ticket_history` row; SQLite triggers block edits/deletes at the storage level, replies included — even Supervisors or raw SQL can't tamper. |
 | 10 | SLA acknowledgment correctness across reassignment/reopen | Done | Only the current assignee can acknowledge; acks are scoped to assignee + breach generation and cleared on reassignment/reopen so stale acks can't suppress new alerts. |
+| 11 | Live deployment reachable by URL, free tiers only | Done | Supabase Postgres (managed DB) + Render (API) + Vercel (UI); live URLs at the top. |
 
 ## How much time did you actually spend?
 
@@ -51,7 +53,6 @@ About 10.5 hours across 5 sessions: requirement analysis & architecture (1.5h), 
 ## What would you do next, with another 12 hours?
 
 - Add a real automated test framework (Vitest/Jest) and CI so the state machine, SLA math, and RBAC rules are regression-tested on every change (currently a standalone `test-api.js` script).
-- Deploy it: host the API and UI, move the DB to managed Postgres or keep SQLite with volume persistence.
 - Add the deferred stretch features: canned responses, customer satisfaction surveys, and an incident status page.
 - Realtime updates via WebSockets instead of 15s/30s polling for SLA timers and the alert badge.
 - Integrate an AI chatbot into the app — draft reply suggestions for agents from the ticket thread, and let customers get instant answers to common questions before they raise a ticket.
@@ -59,6 +60,6 @@ About 10.5 hours across 5 sessions: requirement analysis & architecture (1.5h), 
 ## What are you least happy with in this codebase, and why?
 
 - **Testing is still manual.** The tests live in one standalone script (`backend/src/test-api.js`) instead of a proper test runner wired into CI, so the trickiest logic (SLA pause/resume, ack reset, immutability triggers) only gets checked when someone remembers to run it.
-- **`POST /api/seed` has no login check.** It's handy for demos, but anyone who can reach the server can wipe and re-fill the database — fine on a local machine, risky once it's deployed.
-- **The frontend has the API URL hardcoded** (`http://localhost:5000/api`) with no way to change it via settings, so pointing the UI at a different backend means editing the code.
+- **`POST /api/seed` has no login check.** It's handy for demos, but anyone who can reach the server can wipe and re-fill the database — acceptable on local, a real risk on the live URL. Should be gated behind a supervisor token or disabled in production.
+- **The live API URL comes from a build-time `VITE_API_URL`**, so pointing the UI at a different backend means rebuilding the frontend (rather than a runtime setting).
 - **Some database indexes are missing.** The schema relies on primary/unique keys only, so the paginated queue query will slow down as tickets grow — the docs describe the needed composite index but it isn't created yet.
